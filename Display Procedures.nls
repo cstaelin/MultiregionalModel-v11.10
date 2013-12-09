@@ -1,0 +1,242 @@
+
+;; ------------------------------------------------------------------------------------------------------
+;; OUTPUT PROCEDURES
+;; ------------------------------------------------------------------------------------------------------
+
+;; prints a separator to the control panel.
+;;
+;; NO CONTEXT ASSUMED
+
+to display-separator
+  
+  if not gbl.headless? [
+    blank-line
+    print-message gbl.cmd "*********************************************************************************************"
+    blank-line
+  ]
+  
+end
+;; ------------------------------------------------------------------------------------------------------
+
+;; prints relevant information to the control panel. 
+;;
+;; INDUSTRY CONTEXT, CALLED BY OBSERVER
+  
+;to display-results
+;  
+;  if not (gbl.headless? or gbl.behaviorspace?) [
+;    let lcllist sort ind.localities
+;    let mktlist sort ind.markets
+;    if ind.report-results?  
+;    [
+;      ;;    blank-line
+;      print-message gbl.cmd "----------------------------------------------------"
+;      ;;    blank-line
+;      print-message gbl.cmd (word "For the " ind.name " industry in period " gbl.current-period)
+;      
+;      blank-line
+;      foreach lcllist [
+;        let out (word "Region " [lcl.name] of ? " shipments to " map [[mkt.name] of ?] mktlist
+;          " are " myprecision [lcl.shipments-by-market] of ? 1 " and total " 
+;          myprecision [lcl.shipments] of ? 1 ". Total regional exports are " 
+;          myprecision [lcl.export-shipments] of ? 1 ".")
+;        print-message gbl.cmd out
+;      ]
+;      
+;      blank-line
+;      foreach mktlist [
+;        let out (word "Market " [mkt.name] of ? " receipts of goods from " map [[lcl.name] of ?] lcllist
+;          " are " myprecision [mkt.shipments-by-region] of ? 1 "and total "
+;          myprecision [mkt.total-shipments] of ? 1 ". Total imports are " 
+;          myprecision [mkt.imports] of ? 1 ".")
+;        print-message gbl.cmd out
+;      ]
+;      
+;      blank-line
+;      foreach mktlist [
+;        let out (word "Market " [mkt.name] of ? " sales of goods from " map [[lcl.name] of ?] lcllist
+;          " are " myprecision [mkt.sales-by-region] of ? 1 "and total "
+;          myprecision [mkt.total-sales] of ? 1 ".  Pbar is " [mkt.Pbar] of ? ".")
+;        print-message gbl.cmd out
+;      ]
+;      
+;      blank-line
+;      foreach lcllist [
+;        print-message gbl.cmd (word "Region " [lcl.name] of ? 
+;          " mean, min, median, max and std. deviation of the firms' capacities are "
+;          myprecision [lcl.capacity-data] of ? 1 ".")
+;      ]
+;      
+;    ]
+;  ]
+;  
+;end ;; of display-results
+
+;; ------------------------------------------------------------------------------------------------------
+
+;; Updates the industry labels.
+;;
+;; LABEL CONTEXT
+
+to label-update
+
+;  if not gbl.unattended? [
+    let np ifelse-value (lbl.my-locality = nobody) ["NA"] [[lcl.firm-n] of lbl.my-locality]
+    let ns ifelse-value (lbl.my-market = nobody) ["NA"] [[mkt.suppliers] of lbl.my-market]
+    set label (word np "/" ns)
+;  ]
+
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+to plots-setup
+  
+  ; setup the temporary plot pens.  We use temporary pens as we don't know in advance how many markets
+  ; and localities we will have.  We don't plot if we are in a behaviorspace run or running headless.
+  ; note that in theory we could plot more than one industry if gbl.plot is a string of industries, but 
+  ; such a case would be hard to interpret without more work on the pen colors and/or names to distinguish
+  ; the pens.
+  
+  ; INDUSTRY CONTEXT
+  
+  if not (gbl.headless? or gbl.behaviorspace?) [
+    
+    if (member? ind.name gbl.plot) [
+      let lcllist sort ind.localities
+      let mktlist sort ind.markets
+      
+      let pen-color 0
+      set-current-plot "Number of Suppliers to Each Market"
+      foreach mktlist [
+        create-temporary-plot-pen (word "Market " [mkt.name] of ?)
+        set-plot-pen-color pen-color
+        set pen-color ifelse-value (pen-color = 0) [5] [ifelse-value (pen-color = 135) [0] [pen-color + 10]]
+      ]
+      
+      set pen-color 0
+      set-current-plot "Number of Producers in Each Locality"
+      foreach lcllist [
+        create-temporary-plot-pen (word "Locality " [lcl.name] of ?)
+        set-plot-pen-color pen-color
+        set pen-color ifelse-value (pen-color = 0) [5] [ifelse-value (pen-color = 135) [0] [pen-color + 10]]
+      ]
+      
+      set pen-color 0
+      set-current-plot "Exports"
+      foreach lcllist [
+        create-temporary-plot-pen (word "Locality " [lcl.name] of ?)
+        set-plot-pen-color pen-color
+        set pen-color ifelse-value (pen-color = 0) [5] [ifelse-value (pen-color = 135) [0] [pen-color + 10]]
+      ]
+      
+      set pen-color 0
+      set-current-plot "Imports"
+      foreach mktlist [
+        create-temporary-plot-pen (word "Market " [mkt.name] of ?)
+        set-plot-pen-color pen-color
+        set pen-color ifelse-value (pen-color = 0) [5] [ifelse-value (pen-color = 135) [0] [pen-color + 10]]
+      ]
+      
+      set pen-color 0
+      set-current-plot "Pbar"
+      foreach mktlist [
+        create-temporary-plot-pen (word "Market " [mkt.name] of ?)
+        set-plot-pen-color pen-color
+        set pen-color ifelse-value (pen-color = 0) [5] [ifelse-value (pen-color = 135) [0] [pen-color + 10]]
+      ]
+      
+      set pen-color 0
+      set-current-plot "Average Profit of Firms in"
+      foreach lcllist [
+        create-temporary-plot-pen (word "Locality " [lcl.name] of ?)
+        set-plot-pen-color pen-color
+        set pen-color ifelse-value (pen-color = 0) [5] [ifelse-value (pen-color = 135) [0] [pen-color + 10]]
+      ]
+      
+      set pen-color 0
+      set-current-plot "Average A of Producing Firms in"
+      foreach lcllist [
+        create-temporary-plot-pen (word "Locality " [lcl.name] of ?)
+        set-plot-pen-color pen-color
+        set pen-color ifelse-value (pen-color = 0) [5] [ifelse-value (pen-color = 135) [0] [pen-color + 10]]
+      ]
+    ]
+    
+  ]
+  
+end  ;; of setup-plots
+
+;; ------------------------------------------------------------------------------------------------------
+
+to plots-update
+  
+  ; updates the plots at the end of each period. see the notes with plot-setup, above.
+  
+  ; INDUSTRY CONTEXT
+
+  if not (gbl.headless? or gbl.behaviorspace?) [
+    
+    if (member? ind.name gbl.plot) [
+      let lcllist sort ind.localities
+      let mktlist sort ind.markets
+      
+      set-current-plot "Number of Suppliers to Each Market"
+      foreach mktlist [
+        set-current-plot-pen (word "Market " [mkt.name] of ?)
+        plot [mkt.suppliers] of ?
+      ]
+      
+      set-current-plot "Number of Producers in Each Locality"
+      foreach lcllist [
+        set-current-plot-pen (word "Locality " [lcl.name] of ?)
+        plot [lcl.firm-n] of ?
+      ]
+      
+      set-current-plot "Exports"
+      foreach lcllist [
+        set-current-plot-pen (word "Locality " [lcl.name] of ?)
+        plot [lcl.export-shipments] of ?
+      ]
+      
+      set-current-plot "Imports"
+      foreach mktlist [
+        set-current-plot-pen (word "Market " [mkt.name] of ?)
+        plot [mkt.import-shipments] of ?
+      ]
+      
+      set-current-plot "Pbar"
+      foreach mktlist [
+        set-current-plot-pen (word "Market " [mkt.name] of ?)
+        if [mkt.Pbar] of ? != gbl.NA [plot [mkt.Pbar] of ?]
+      ]
+      
+      set-current-plot "Average Profit of Firms in"
+      foreach lcllist [
+        set-current-plot-pen (word "Locality " [lcl.name] of ?)
+        if any? [lcl.firm-set] of ? [plot [lcl.avgProfit] of ?]
+      ]
+      
+      set-current-plot "Average A of Producing Firms in"
+      foreach lcllist [
+        set-current-plot-pen (word "Locality " [lcl.name] of ?)
+        if any? [lcl.firm-set] of ? [plot mean [frm.A] of ([lcl.firm-set] of ?)]
+      ]
+    ]
+    
+  ]
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+;; ------------------------------------------------------------------------------------------------------
+
+to blank-line
+  
+    print-message gbl.cmd ""
+
+end  ;; of blank-line
+
+;; ------------------------------------------------------------------------------------------------------
+
+

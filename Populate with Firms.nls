@@ -1,0 +1,105 @@
+to populate-with-firms
+  
+  ;; Populates the industry with firms.  
+  ;;
+  ;; INDUSTRY CONTEXT
+  
+  populate-by-industry ind.markets
+  
+  ;; Then we do some updating:
+  ask ind.localities [locality-update capacity-data-update]
+  ask ind.markets [market-update]
+  ask ind.labels [label-update]
+  
+  ; set some datastore histories and averages.
+  ask ind.localities [
+    locality-history-start
+    repeat gbl.history-length [locality-history-update]
+  ]
+  
+  ; and some market histories.
+  ask ind.markets [
+    market-history-start
+    repeat gbl.history-length [market-history-update]
+  ]
+  
+  ; and finally, initialize the cash-balances of the firms.
+  ask ind.localities [
+    set-initial-cash-balance lcl.firm-set
+  ]
+  
+end  ;; of populate-with-firms
+
+;; ------------------------------------------------------------------------------------------------------
+;; ------------------------------------------------------------------------------------------------------
+
+to populate-by-industry [ mkts ]
+  
+  ;; populates the industry with n firms in each locality.
+  ;;
+  ;; INDUSTRY CONTEXT
+  
+  ;; create n firms in each region with randomized productivities, 
+  ;; but all with the same initial capacity, as determined for this locality above.
+  ask ind.localities [ 
+    repeat lcl.begin-with-n [
+      let new-firm firm-create-with-capacity lcl.initial-capacity 0
+      ask new-firm [firm-announce-in]
+    ]
+  ]
+  
+  ; ask each firm to split its initial shipments equally among all markets, as a guess for the 
+  ; next step.
+  ask ind.firm-set [
+    let shpmnt frm.capacity
+    set shpmnt shpmnt / count frm.shipment-agents
+    ask frm.shipment-agents [
+      set shpa.volume-shipped shpmnt
+      set shpa.volume-for-sale shpmnt
+      set shpa.volume-sold shpmnt
+    ]
+  ]
+  
+  ; now ask each region to have its firms set their profit-maximizing shipments to each market, using 
+  ; the trial quantities set above.
+  ask ind.localities [
+    ;; First evaluate the external economies factor based on the number of firms that had positive
+    ;; shipments in the previous period. 
+    ;; This will not include firms that were newly created as their frm.current-shipments will be zero.
+    let active-firm-n count (lcl.firm-set with [frm.current-shipments > 0])
+    set lcl.external-econ-factor external-economies active-firm-n
+    
+    ; ask all firms to set their technological constant, A0, based on the external economy 
+    ; and then to set their profit-maximizing shipments to each market.
+    ask lcl.firm-set [ 
+      set frm.A (frm.A0 * [lcl.external-econ-factor] of myself)
+      firm-set-current-shipments
+    ]
+  ]
+  
+  ; finally, create and initialize each firm's and link's history table, using the current shipments 
+  ; and prices.
+  ask ind.firm-set [
+    firm-history-start
+    repeat gbl.history-length [ firm-history-update ]
+    ask frm.shipment-agents [ 
+      set shpa.expected-MR marginal-revenue shpa.volume-shipped
+      shipment-history-start
+      repeat gbl.history-length[ shipment-history-update ]
+    ] 
+  ]
+  
+  ; update the display with the initial set of firms.
+  ask ind.labels [label-update]
+  display
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+;; ------------------------------------------------------------------------------------------------------
+;; ------------------------------------------------------------------------------------------------------
+;; ------------------------------------------------------------------------------------------------------
+;; ------------------------------------------------------------------------------------------------------
+;; ------------------------------------------------------------------------------------------------------
+;; ------------------------------------------------------------------------------------------------------
+

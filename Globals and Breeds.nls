@@ -1,0 +1,466 @@
+;; This file includes the global and breed definitions.
+;;
+breed [worlds world]
+breed [firms firm]
+breed [industry-labels industry-label]
+breed [industries industry]
+breed [markets market]
+breed [regions region]
+breed [localities locality]
+breed [shipagents shipagent]
+breed [countries country]
+
+directed-link-breed [shipments shipment]
+directed-link-breed [commercial-links commercial-link]
+undirected-link-breed [country-links country-link]
+
+;; regions is an agentset of the patches which have been designated as geographic entities.
+;; gbl.region-list is a list of the integers from 0 to r, where r is the number of regions.
+;; (NetLogo does not support breeds of patches.)
+globals [
+  
+  ;; these globals determine how the model is run and are common to all runs that might happen
+  ;; concurrently.
+  gbl.behaviorspace?         ;; indicates if running under BehaviorSpace.
+  gbl.headless?              ;; indicates if running headless.
+  gbl.new-world?             ;; indicates if we use a new world or saved world on setup.
+  gbl.initialized?           ;; indicates if global booleans and strings are unitialized.
+  gbl.in-setup1?             
+  gbl.in-setup2?
+  gbl.run-for-equilibrium
+  gbl.setup-stable?
+  gbl.go-report?
+  gbl.setup-report?
+
+  gbl.world-agent            ;; an agent
+  gbl.current-period         ;; scalar, the current time period.
+  
+  gbl.setup-results          ;; string, saved results from setup.
+  gbl.max-periods            ;; scalar, the default number of periods to run before a halt.
+
+  gbl.experiment-path
+  gbl.data-path
+  gbl.results-path
+  gbl.saved-world-filename   ;; string, the name to use for saved worlds.
+  gbl.output-filename        ;; string, the output filename.
+  gbl.message-filename       ;; string
+  
+  gbl.setup-profile          ;; string, file name for the setup profile.
+  gbl.run-profile            ;; string, file name for the go profile.
+  
+;; these globals are used throughout the model for all worlds.
+  gbl.return-type
+  gbl.history-length
+  gbl.forecast-lookback      ;; the default length of the various lists of past values.
+  gbl.pattern-length-needed
+  gbl.pattern-%-needed
+  gbl.pattern-max-%-allowed
+  gbl.profitmax-precision    ;; precision (in decimal places) to be achieved by the simplex procedure.
+  
+  gbl.BIG                    ;; A "big" number.
+  gbl.tiny                   ;; A "tiny" number.
+  gbl.NA                     ;; the number used to signifiy "NA".
+  
+  gbl.profile-start
+  gbl.profile-end
+  gbl.cmd
+  gbl.opt
+  
+; these globals are here to make behaviorSpace runs easier.
+  bsp.pf-A-stddev
+  bsp.transport-cost
+  bsp.follow-me
+  bsp.wage-factor
+  bsp.external-econ-ub
+
+  
+;; these globals are currently defined and set by switches, input boxes or sliders.
+;  gbl.profile?             ;; boolean, to profile, or not to profile?
+;  gbl.Seed                 ;; scalar, the seed for the random number generator.
+;  gbl.setup-report?        ;; booleam, report detailed "setup" events to the command area?
+;  gbl.go-report?           ;; boolean, report detaled "go" events to the command area?
+;  gbl.save-setup?          ;; boolean, save the results of New World for later restoration?
+;  gbl.write-to-file?       ;; boolean, write output to a file?
+;  gbl.messages-to-file?    ;; boolean
+;  gbl.allow-new-firms?     ;; boolean, may firms be created and die?
+;  gbl.initial-cash-balance ;; scalar
+;  gbl.follow-me            ;; scalar, the % of any price change that the firm thinks will
+                            ;; be matched by other firms.
+;  gbl.plot                 ;; string, the name of the industry to be plotted.
+;  gbl.loss-criterion       ;; string, the criterion for pruning firms.
+;  gbl.max-new-markets      ;; the maximun number of new export markets the firm can enter at any one time.
+;  gbl.full-setup           ;; use simplex to solve the allocation of shipments in setup, rather than iteration.
+;  gbl.policy-data          ;; the file that holds the policy data for this run.
+  
+
+]
+
+;; These are variables for the whole world.
+worlds-own [
+  wld.regions                ;; agentset, holds the agentset of region patches
+  wld.industries             ;; agentset, holds the agentset of industry agents.
+  wld.profit-threshold       ;; scalar, used in the setup of the model only.
+  wld.policy-schedule
+  wld.policy-change-list
+]
+
+; some patches will be associated with a region of a country. these variables are set only
+; for those patches.
+patches-own [                        
+  pch.country-name                   
+  pch.region-name
+]
+
+regions-own [
+  rgn.country-name                   ;; string with country name
+  rgn.region-name                    ;; string with region name
+  rgn.full-name                      ;; string with region and country names concatenated
+  rgn.country-agent                  ;; agent for this region's country
+  
+  rgn.wageK                          ;; scalar
+  rgn.wageL                          ;; scalar
+  rgn.wageL-base
+  rgn.wage-change
+  rgn.interest-rate                  ;; scalar
+  
+  rgn.localities-here                ;; agentset, set of industry localities in this region.
+  rgn.markets-here                   ;; agentset, set of industry markets in this region.
+  rgn.labels-here                    ;; agentset, set of industry labels on this region.
+]
+
+; agents representing the countries in the model.  Each country may have more than one region.
+countries-own [
+  ctry.name
+  ]
+
+; links between the country centers.  These are used to calculate the distance between countries.
+; They are not industry-specific.
+country-links-own [ 
+  ctyl.distance                    ;; scalar
+  ]
+
+;; there is one of these agents for each industry.  It is at the top of the industry hierarchy.
+industries-own [
+  ind.name                          ;; string
+  ind.world                         ;; agent, world to which this industry belongs
+  ind.icon-shape
+  ind.icon-size
+  ind.icon-offset
+  ind.icon-color
+  ind.firm-set                      ;; agentset of all firms in the industry
+  ind.firm-set-list                 ;; ordered list of all firms in the industry (by who number)
+  ind.markets                       ;; agentset of all markets for this industry
+  ind.localities                    ;; agentset of all datastores for this industry - one in each producing region
+  ind.labels                        ;; agentset of all labels for this industry - one in each region
+  ind.commercial-links              ;; linkset of commercial links between localities and markets in this industry.
+  
+  ind.prune-by-region?              ;; boolean
+  ind.biggest-loser-reporter        ;; string
+  ind.max-industry-closers          ;; scalar, between 0 and 1
+  ind.max-regional-closers          ;; scalar, between 0 and 1
+  ind.shipment-min                  ;; scalar, the minimum shipment allowed to any one market.
+  ind.follow-me
+  
+  ind.report-results?               ;; boolean
+;  ind.plot-results?                 ;; boolean
+  ind.transport-cost                ;; scalar
+  ind.transport-cost-prior          ;; scalar
+  
+  ind.pattern-list
+]
+
+;; there is one of these agents for each industry in each region.  it's label displays the number of firms located
+;; in the locality in that region and the number of suppliers to the market in that region.
+industry-labels-own [
+  lbl.ind-name                      ;; string
+  lbl.offset                        ;; list
+  lbl.my-locality                   ;; agent - the locality for this industry in this region (or nobody).
+  lbl.my-market                     ;; agent - the market agent for this industry in this region (or nobody).
+]
+
+;; ther is one of these agents for each industry in each producing region.  (Not all regions may be producing 
+;; regions for this industry.)  The locality agent collects the industry-level production data for the region.
+localities-own [
+  lcl.country-name                  ;; string                       
+  lcl.region-name                   ;; string
+  lcl.name
+  lcl.my-patch
+  lcl.region-agent
+  lcl.ind-name                      ;; string
+  lcl.ind-agent                     ;; agent, the coordinating agent for this industry (breed industries)
+  lcl.market-in-region              ;; agent, the market for this industry which is in the same region, if any.
+  lcl.history                       ;; pointer to a stats table.
+  lcl.history-table-data            ;; saves stats table data during export world
+  lcl.history-table-names           ;; saves stats table names during export world
+  
+  lcl.firm-n                        ;; integer, number of firms in the in the region and industry of the datastore.
+  lcl.firm-set                      ;; agentset, agentset of firms in the in the region and industry of the locality.
+  lcl.test-firm?                    ;; boolean, is there a "test" firm in this region?
+  
+  lcl.pf-alpha                      ;; scalar
+  lcl.pf-beta                       ;; scalar
+  lcl.pf-sigma                      ;; scalar
+  lcl.pf-rho                        ;; scalar
+  lcl.pf-A                          ;; scalar, the mean of the distribution of values of A
+  
+  lcl.begin-with-n                  ;; scalar
+  lcl.initial-capacity              ;; scalar
+  lcl.initial-capital-stock         ;; scalar
+  lcl.initial-capital-stock-range   ;; scalar, as a proportion of the mean
+  lcl.capacity-cushion              ;; scalar
+  lcl.depreciation-rate             ;; scalar
+  lcl.capacity-adj-factor           ;; scalar
+  lcl.K-adjustment-factor           ;; scalar
+  lcl.capacity-data                 ;; list made up of mean, min, median, max and standard deviation of capacities.
+   
+  lcl.costs-random-normal?          ;; boolean
+  lcl.pf-A-stddev                   ;; scalar, the standard deviation of values of A
+  lcl.pf-A-range                    ;; scalar
+
+  lcl.FCbar                         ;; scalar
+  lcl.MCbar                         ;; scalar
+  
+  lcl.avgProfit                     ;; scalar
+  lcl.maxProfit                     ;; scalar
+  lcl.avgProfit-forecast            ;; scalar
+  lcl.avgProfit-lookback            ;; integer
+;  lcl.profit-threshhold             ;; scalar
+  lcl.failrate                      ;; scalar
+  lcl.max-shipment-change           ;; scalar
+  lcl.minimum-export                ;; scalar
+  lcl.startup-cost                  ;; scalar
+  lcl.market-entry-payback-period   ;; scalar
+    
+  lcl.shipments                     ;; scalar, total shipments of all firms in this industry and locaton.
+  lcl.shipments-lookback            ;; scalar
+;  lcl.shipments-by-market           ;; list
+  lcl.export-shipments              ;; scalar, total exports of all firms in this industry and region.
+  lcl.local-shipments               ;; scalar, total within-this-region sales of all firms in this industry.
+  lcl.exports-fob
+
+  lcl.model-firm-%tile              ;; scalar from 0 to 100
+  lcl.model-firm-reporter           ;; a string
+  lcl.biggest-loser-reporter        ;; a string
+  lcl.producer-pruned?              ;; boolean
+  lcl.last-firm-died                ;; scalar (tick value)
+  
+  lcl.external-econ-ub              ;; scalar
+  lcl.external-econ-alpha           ;; scalar
+  lcl.external-econ-nstar           ;; scalar
+  lcl.external-econ-factor          ;; scalar
+  
+  lcl.producer-added?               ;; boolean
+  lcl.fallow-period                 ;; integer
+  lcl.max-losers                    ;; scalar
+  lcl.initial-cash-balance          ;; scalar
+  
+;  lcl.distance-to-market            ;; list - distances from the center of this region, sorted by market number.
+  
+ ; lcl.subsidy-rates                 ;; list with one entry for each market
+ ; lcl.unit-subsidies                ;; list with one entry for each market
+  
+  lcl.interest-rate                 ;; scalar, for an industry-specific rate, if any. See rgn.interest-rate.
+  ]
+
+;; there is one of these agents for each industry in each consuming region.  (Not all regions may be consuming  
+;; regions for this industry.)  The market provides the industry-level demand for the region.
+markets-own [
+  mkt.world-agent                   ;; agent
+  mkt.country-name                  ;; string
+  mkt.region-name                   ;; string
+  mkt.name
+  mkt.my-patch
+  mkt.region-agent                  ;; agent, the regional agent for the region in which the market is located.
+  mkt.ind-name                      ;; string, the name of the industry for this market.
+  mkt.ind-agent                     ;; agent, the coordinating agent for this industry (breed industries)
+  mkt.locality-in-region            ;; agent, the datastore in the same region as the market - may be nobody.
+  mkt.history                       ;; pointer to a stats table
+  mkt.history-table-data            ;; saves stats table data during export world
+  mkt.history-table-names           ;; saves stats table names during export world
+  
+  mkt.size                          ;; scalar, total demand in this market.
+  mkt.sigma                         ;; scalar, exponent on S in the market demand equation.
+  mkt.elasticity
+  
+  mkt.suppliers                     ;; integer, number of firms actively supplying this market.
+  mkt.Pbar                          ;; scalar, average delivered price in this market.
+  mkt.Pbar-lookback                 ;; scalar
+  mkt.Psig
+  mkt.Phat
+  mkt.avg-delivered-cost            ;; scalar, average unit cost of goods delivered to this market. 
+  mkt.shipments                   ;; scalar, total volume of goods sold in this market.
+  mkt.local-shipments                  ;; scalar
+;  mkt.sales-by-region               ;; scalar, imports into this market from each region other than its own.
+;  mkt.total-shipments               ;; scalar
+;  mkt.local-shipments               ;; scalar
+;  mkt.shipments-by-region           ;; list
+  mkt.import-shipments                       ;; scalar
+  mkt.imports-cif
+  
+  mkt.entry-cost                    ;; scalar, fixed cost entering the (export) market.
+  mkt.sales-cost-max-discount       ;; scakar, parameter used in penalizing large changes in sales.
+  mkt.sales-cost-free-ride-factor   ;; scalar, parameter used in penalizing large changes in sales.
+  mkt.marketing-cost-rate           ;; scalar, (export) marketing cost as a % of market price.
+  mkt.marketing-cost-unit-charge    ;; scalar, (export) marketing cost per unit.
+  
+  mkt.supplier-pruned?              ;; boolean
+  mkt.supplier-added?               ;; boolean
+]
+
+; these links run between the localities and markets in each industry.  (shipment links run between
+; firms and markets.) they hold the commercial policy parameters affecting trade between the locality
+; and the market.  
+; AT THE MOMENT, commercial policy is country specific, not locality or market 
+; specific.  therefore commercial links between all the localities in one country and all the markets 
+; markets in another country (in the same industry, of course) should share the same commercial policy.
+commercial-links-own [
+  clnk.name
+  clnk.ind-name
+  clnk.lcl-name
+  clnk.mkt-name
+  clnk.tariff-rate
+  clnk.unit-tariff
+  clnk.subsidy-rate
+  clnk.unit-subsidy
+  clnk.is-export-link?
+  
+  clnk.shipments
+  clnk.value-fob
+  clnk.value-cif
+]
+
+;; firms are generic in their structure, but may produce only one product at a time, and be 
+;; located in only one region at a time.
+firms-own [
+  frm.ind-agent                     ;; agent
+  frm.ind-name                      ;; string
+  frm.region-agent                  ;; agent, the regional agent for the region in which the firm is located.
+  frm.region-name                   ;; string, the name of the region in which the firm is located.
+  frm.locality                      ;; turtle agent
+  frm.history                       ;; pointer to a stats table
+  frm.history-table-data            ;; saves stats table data during export world
+  frm.history-table-names           ;; saves stats table names during export world
+  
+  frm.is-dummy?                     ;; boolan
+  
+  frm.A0                            ;; scalar, base technology factor in the production function
+  frm.A                             ;; scalar, technology factor adjusted for agglomeration
+  frm.K                             ;; scalar, firm's capital stock
+  frm.alpha                         ;; scalar, CES capital share
+  frm.L                             ;; scalar, firm's labor stock
+  frm.beta                          ;; scalar, CES labor share
+  frm.sigma                         ;; scalar, CES elasticity of substitution
+  frm.rho                           ;; scalar, (sigma - 1) / sigma
+  
+  frm.capacity                      ;; scalar, firm's capacity in units of output
+  frm.initial-capacity              ;; scalar, firm's capacity upon its creation
+  frm.depreciation-rate             ;; scalar
+  frm.capacity-cushion              ;; scalar
+  frm.capacity-adj-factor           ;; scalar
+  frm.K-adjustment-factor           ;; scalar
+  
+  frm.FC                            ;; scalar
+  frm.MC                            ;; scalar
+  frm.current-total-cost            ;; scalar, total production cost of all current shipments  
+  
+  frm.current-shipments             ;; scalar
+  frm.current-exports               ;; scalar
+  frm.max-shipment-change           ;; scalar b/w 0.0 and 1.0, max change in shipments to any market.
+  frm.minimum-export                ;; scalar, minimum allowed level of exports
+  frm.shipment-lookback             ;; scalar, shipments averaging period
+    
+  frm.current-sales                 ;; scalar, total of current sales in all markets
+  frm.current-revenue               ;; scalar, sum of current revenues in all markets
+
+  frm.expected-profit               ;; scalar, profit expected on all current shipments.
+  frm.current-profit                ;; scalar, profit earned on all current sales.
+  frm.profit-forecast               ;; scalar
+  frm.profit-lookback               ;; scalar, Profits averaging period
+  frm.market-entry-payback-period   ;; scalar
+  frm.market-entry-costs            ;; scalar
+  frm.max-entries-per-period        ;; scalar, the max number of export markets a firm can enter in any one period.
+  
+  frm.cash-balance                  ;; scalar, firm's current cash balance.
+  frm.cash-flow                     ;; this period's cash flow: current-revenue - current-total-cost.
+  
+  frm.shipment-links                ;; agentset of shipment links  NOT REALLY USED NOW
+  frm.shipment-linklist             ;; list of shipment links sorted by market number NOT REALLY USED NOW
+  frm.shipment-agents               ;; agenset of shipment link agents
+  frm.shipment-agentlist            ;; list of shipment link agents sorted by market number
+  
+  frm.fixed-linklist                ;; list of lists used in maximizing profits
+  frm.fixed-q-total                 ;; scalar, the fixed output assumed in maximizing profits.
+  
+  frm.profitmax-agentlist
+  frm.profitmax-qlist
+  frm.profitmax-ubounds
+  frm.profitmax-lbounds
+  frm.profitmax-max-shipment-change
+]
+
+;; These are directed links between each firm and each of the markets it may potentially serve.
+;; The links collect firm/market-level shipment and price data.
+shipments-own [
+  ;; The link just records the shipment agent that holds the data for the link.
+  shpl.shipment-agent                ;; agent, the agent holding the data for this link
+]
+
+; A shipagent is associated with each of the shipment links.  We use an agent attached to
+; each link to hold firm/market-level shipment and price data as agents can be cloned while links can not.
+shipagents-own [
+  ; end 1 is the shipping firm; end2 is the receiving market.  We also want to keep track of the patch
+  ; (region) on which the firm sits and the industry locality for that region, and of the patch on 
+  ; which the receiving market sits.
+  shpa.shipment-link                 ;; link, the link to which this agent is attached
+  shpa.commercial-link               ;; link, commercial link (locality --> market) for this agent's trade.
+  shpa.firm                          ;; agent, the source agent for that link
+  shpa.market                        ;; agent, the destination agent for that link
+  shpa.ind-agent                     ;; agent, the industry agent for this firm
+  shpa.source-country                ;; string, the source country for shipments
+  shpa.source-region                 ;; agent, the source region (patch) for shipments
+  shpa.source-locality               ;; agent, the industry locality for this region
+  shpa.destination-country           ;; string, the destination country for shipments
+  shpa.destination-region            ;; agent, the destination region (patch) for shipments
+  shpa.is-export-link?               ;; boolean, true if the destination region and source region differ
+  
+  shpa.history                       ;; pointer to a data table
+  shpa.history-table-data            ;; saves stats table data during export world
+  shpa.history-table-names           ;; saves stats table names during export world
+  shpa.history-lookback              ;; scalar 
+  
+  shpa.volume-shipped                ;; scalar
+  shpa.cost-of-goods-shipped         ;; scalar
+  shpa.expected-netprice             ;; scalar, net ex-factory price expected on current shipments.
+  shpa.expected-MR                   ;; scalar, net ex-factory MR expected on current shipments.
+  shpa.profit-on-shipments           ;; scalar, expected profit on current shipments.
+  shpa.volume-for-sale               ;; scalar
+  shpa.cost-of-goods-for-sale        ;; scalar
+  shpa.volume-sold                   ;; scalar
+  shpa.revenue-on-goods-sold         ;; scalar
+  shpa.cost-of-goods-sold            ;; scalar
+  shpa.profit-on-sales               ;; scalar
+  shpa.netprice                      ;; scalar, net ex-factory price received on current sales.
+  shpa.FOB                           ;; scalar, FOB price
+  shpa.CIF                           ;; scalar, CIF price
+  shpa.mktprice-discounted           ;; scalar, mktprice discounted for sales costs (if any)
+  shpa.mktprice                      ;; scalar, market price
+  shpa.elasticity                    ;; scalar, the own-price elasticity of demand in this market.
+  
+  shpa.distance                      ;; scalar
+  shpa.unit-freight-cost             ;; scalar, changes each tick in response to the slider.
+  shpa.tariff-rate                   ;; scalar
+  shpa.unit-tariff                   ;; scalar
+  shpa.subsidy-rate                  ;; scalar
+  shpa.unit-subsidy                  ;; scalar
+  
+  shpa.entry-cost                    ;; scalar, fixed cost entering the (export) market.
+  shpa.sales-cost-max-discount       ;; scakar, parameter used in penalizing large changes in sales.
+  shpa.sales-cost-free-ride-factor   ;; scalar, parameter used in penalizing large changes in sales.
+  shpa.marketing-cost-rate           ;; scalar, (export) marketing cost as a % of market price.
+  shpa.marketing-cost-unit-charge    ;; scalar, (export) marketing cost per unit.
+]
+
+to-report i-w-n [ name ]
+  report one-of industries with [ind.name = name]
+end
+

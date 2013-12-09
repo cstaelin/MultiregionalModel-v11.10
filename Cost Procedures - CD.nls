@@ -1,0 +1,120 @@
+; PROCEDURES DEPENDENT UPON A SPECIFIC COST FUNCTION.
+
+; These are for a Cobb-Douglas production function and they are called as special cases
+; of the CES production function.
+
+;; ------------------------------------------------------------------------------------------------------
+
+to-report my-Q-CD
+  
+  ; reports the firm's output at its current K and L.
+  
+  ; FIRM CONTEXT
+  
+  report frm.A * frm.K ^ frm.alpha * frm.L ^ frm.beta
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+;; reports the firm's marginal cost as a function of total output.
+;;
+;; FIRM CONTEXT
+
+to-report my-SRMC-CD [ Q ]
+  
+  let oneoverbeta (1 / frm.beta)
+  let gamma ([rgn.wageL] of frm.region-agent) / ( (frm.A * frm.K ^ frm.alpha) ^ oneoverbeta)
+  
+  report (gamma / frm.beta) * (Q ^ (oneoverbeta - 1))
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+;; ------------------------------------------------------------------------------------------------------
+;; ------------------------------------------------------------------------------------------------------
+;; ------------------------------------------------------------------------------------------------------
+
+to-report my-hiring-CD [ Q ]
+  
+  ; reports the labor needed by the firm at any given quantity (and frm.K).
+  
+  ; FIRM context
+  
+  report ( Q / (frm.A * (frm.K ^ frm.alpha)) ) ^ (1 / frm.beta)
+    
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+;; reports the firm's capacity given its current capital stock.
+;;
+;; FIRM CONTEXT
+
+to-report my-capacity-CD
+  
+  let KoL ((frm.beta * [rgn.wageK] of frm.region-agent) / (frm.alpha * [rgn.wageL] of frm.region-agent))
+  report ( frm.A * (KoL ^ frm.beta) * (frm.K ^ (frm.alpha + frm.beta)) )
+
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+;; reports the particlular firm's optimal optimal long-run capital stock for output Q.
+;;
+;; FIRM CONTEXT
+
+to-report my-optimal-K-CD [ Q ]
+  
+  let KoL ((frm.beta * [rgn.wageK] of frm.region-agent) / (frm.alpha * [rgn.wageL] of frm.region-agent))
+  report ( (Q  / (frm.A * (KoL ^ frm.beta))) ^ (1 / (frm.alpha + frm.beta)) )
+
+end  
+
+;; ------------------------------------------------------------------------------------------------------
+
+to-report optimal-K-CD [ q A alpha beta v w ]
+  
+  ; reports the optimal long-run capital stock for output Q at the given wages for a production 
+  ; with the given parameters.
+    
+  ; NO CONTEXT
+
+  let KoL (beta * v) / (alpha * w)
+  report  (q  / (A * (KoL ^ beta))) ^ (1 / (alpha + beta)) 
+
+end  
+
+;; ------------------------------------------------------------------------------------------------------
+
+
+to-report optimal-L-CD [ q A alpha beta v w ]
+  
+  ; reports the optimal long-run labor stock for output Q at the given wages for a production 
+  ; with the given parameters.
+    
+  ; NO CONTEXT
+
+  let KoL (alpha * w) / (beta * v)
+  report  (q  / (A * (KoL ^ alpha))) ^ (1 / (alpha + beta)) 
+
+end  
+
+;; ------------------------------------------------------------------------------------------------------  
+
+to-report hiring-at-CD [ q A alpha beta v w K ]
+  
+  ; reports the labor needed at output q by a firm with given K and production function parameters.
+  
+  ; NO CONTEXT
+  
+  report ( q / (A * (K ^ alpha)) ) ^ (1 / beta)
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+;; ------------------------------------------------------------------------------------------------------
+;; ------------------------------------------------------------------------------------------------------
+;; ------------------------------------------------------------------------------------------------------
+;; ------------------------------------------------------------------------------------------------------
+

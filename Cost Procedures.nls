@@ -1,0 +1,104 @@
+; These cost procedures are independent of the particular production function.
+
+
+to-report my-total-cost-at-KL
+  
+  ; reports the firm's total cost given its current levels of K and L.
+  ; FIRM CONTEXT
+  
+  report ( (frm.K * [rgn.wageK] of frm.region-agent) + (frm.L * [rgn.wageL] of frm.region-agent) )
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+to-report my-SRTC [ q ]
+  
+  ; reports the firm's total cost as a function of the firm's current capital stock and total output, Q.
+
+  ; FIRM CONTEXT
+
+  
+  report ( (frm.K * [rgn.wageK] of frm.region-agent) + ((my-hiring q) * [rgn.wageL] of frm.region-agent) )
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+;; ------------------------------------------------------------------------------------------------------
+
+
+to-report my-LRATC [ q ]
+  
+  ; reports the LRATC of the calling firm at output "q" using the long-run-cost procedures.
+  ; If q < 0, firm uses the current value of its total shipments.
+  ; If q = 0, report zero.
+
+  ; FIRM CONTEXT
+  
+  let quantity ifelse-value (q < 0) [first frm.current-shipments] [q]
+  if (quantity = 0) [report 0]
+  
+  report (LRTC-at quantity frm.A frm.alpha frm.beta frm.sigma
+          [rgn.wageK] of frm.region-agent  [rgn.wageL] of frm.region-agent) / quantity
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+to-report LRTC-at [ q A alpha beta sigma v w ]
+  
+  ; reports the LRTC at output q at the given wages for a production function with the given paramers.
+  
+  ; NO CONTEXT
+  
+  ; first find the optimal K and L for that q, and then evaluate the cost.
+  let K optimal-K  q A alpha beta sigma v w
+  let L optimal-L  q A alpha beta sigma v w
+  
+  report v * K + w * L
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+to-report LRATC-at [ q A alpha beta sigma v w ]
+  
+  ; reports long-run average total cost at output q, given all the paramenters of the production 
+  ; function and the factor wages. check first for q = 0.
+
+  ; NO REAL CONTEXT
+  
+  if (q = 0) [report 0]
+  report (LRTC-at q A alpha beta sigma v w) / q
+  
+end
+  
+;; ------------------------------------------------------------------------------------------------------
+
+to-report SRTC-at [ q A alpha beta sigma v w K ]
+  
+  ; reports SRTC at output q at the given wages for a production function with the given paramers.
+  
+  ; NO CONTEXT
+  
+  report v * K + w * hiring-at q A alpha beta sigma v w K
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+to-report SRATC-at [ q A alpha beta sigma v w K ]
+  
+  ; reports SRATC at a given output with a given capital stock and other production function parameters.
+  ; check first for q = 0.  We assume that there is some fixed cost, so SRTC --> infinity as q --> 0.
+
+  ; NO CONTEXT
+
+  if (q = 0) [report gbl.big]
+  report (SRTC-at q A alpha beta sigma v w K) / q
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+;; ------------------------------------------------------------------------------------------------------
+;; ------------------------------------------------------------------------------------------------------

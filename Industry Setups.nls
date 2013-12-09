@@ -1,0 +1,326 @@
+globals [
+  
+;; THESE GLOBALS ARE USED ONLY FOR THE INITIALIZATION OF EACH INDUSTRY
+;; THEY ARE FILLED IN WHEN THE INDIVIDUAL INDUSTRY SETUP PROCEDURES ARE CALLED
+;; BY THE MODEL SETUP PROCEDURE AND THEN USED TO POPULATE THE PARAMETERS FOR EACH
+;; INDUSTRY AND ITS MARKETS, DATASTORES AND FIRMS.
+;; THIS IS THE EASIEST WAY TO PASS THE INDUSTRY-SPECIFIC PARAMETERS TO MODEL-SETUP.
+
+;; just one value for each region
+
+;; just one value for each industry.
+  setup.ind.label-size
+  setup.ind.label-shape 
+  setup.ind.label-offset
+  setup.ind.shape-color
+  setup.ind.name
+  setup.ind.prune-by-region?
+  setup.ind.biggest-loser-reporter
+  setup.ind.max-industry-closers
+  setup.ind.max-regional-closers
+  setup.ind.shipment-min
+  setup.ind.profit-tolerance
+  setup.ind.report-results?
+  
+;; these lists have one entry for each market in the industry.
+  setup.mkt.size-list
+;  setup.mkt.elasticity-list
+;  setup.mkt.beta-list
+  setup.mkt.price-response-list
+  setup.mkt.price-response-nfirms-list
+  setup.mkt.P0-list
+  setup.mkt.sigma-list
+  setup.mkt.slope-list
+;  setup.mkt.Pbar-list
+  setup.mkt.sales-cost-max-discount-list
+  setup.mkt.sales-cost-free-ride-factor-list
+  setup.mkt.entry-cost-list
+  setup.mkt.marketing-cost-rate-list
+  setup.mkt.marketing-cost-unit-charge-list
+
+;; these lists have one entry for each producing region (patch) in the industry.
+  setup.db.pf-A-list
+  setup.db.pf-alpha-list
+  setup.db.pf-beta-list
+  setup.db.initial-capacity-list
+  setup.db.initial-capital-list
+  setup.db.initial-capital-range-list
+  setup.db.capacity-cushion-list
+  setup.db.depreciation-rate-list
+  setup.db.capacity-adj-factor-list
+  setup.db.K-adjustment-factor-list
+  setup.db.initial-nfirms-list
+  
+  setup.db.are-costs-random-normal?
+  setup.db.pf-A-stddev-list                          ;; as a proportion of the mean.
+  setup.db.pf-A-range-list
+  
+  setup.db.shipments-lookback-list
+  setup.db.max-shipment-change-list
+  setup.db.minimum-export-list
+  setup.db.market-entry-payback-period-list
+  setup.db.startup-cost-list
+  setup.db.interest-rate-list
+  
+  setup.db.firm's-profit-lookback-list
+  setup.db.region's-profit-lookback-list
+  setup.db.profit-threshhold-list
+  setup.db.fallow-period-list
+  setup.db.max-losers
+  setup.db.model-firm-%tile-list
+  setup.db.model-firm-reporter-list
+  setup.db.biggest-loser-reporter-list
+  setup.db.external-econ-lb-list
+  setup.db.external-econ-alpha-list
+  setup.db.external-econ-nstar-list  
+]
+
+;; ------------------------------------------------------------------------------------------------------
+
+to-report get-industry-list
+  
+  let industry-list (list task [setup-industry-autos ?] task [setup-industry-steel ?])
+;  let industry-list (list task [setup-industry-autos ?])
+  report industry-list
+
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+to setup-world
+  
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+;; defines the geography of our world by specifying the physical location of all regions that might 
+;; contain a production center and/or a market.  The patch-set must include any region that would be
+;; specified as a markt-r or prodn-r region by an industry.
+;;
+;; OBSERVER CONTEXT
+
+;to-report setup-regions
+;  
+;  ask patch -2 2 [
+;    set rgn.region-name "US"
+;    set rgn.wageK 10.0
+;    set rgn.wageL 100.0
+;    set rgn.interest-rate 0.0125
+;  ]
+;  ask patch 1 2  [
+;    set rgn.region-name "GB"
+;    set rgn.wageK 10.0
+;    set rgn.wageL 100.0
+;    set rgn.interest-rate 0.0125
+;  ]
+;  ask patch -2 1 [
+;    set rgn.region-name "MX"
+;    set rgn.wageK 10.0
+;    set rgn.wageL 100.0
+;    set rgn.interest-rate 0.0125    
+;  ]
+;  ask patch 2 -2 [
+;    set rgn.region-name "SA"
+;    set rgn.wageK 10.0
+;    set rgn.wageL 100.0
+;    set rgn.interest-rate 0.0125
+;  ]
+;  
+;  report (patches with [rgn.region-name != ""])
+;  
+;end
+
+;; ------------------------------------------------------------------------------------------------------
+
+;to-report list-of-regions-with-names [ names ]
+;
+;;; reports a list of patches with the names contained in the list of names.
+;;; 
+;;; CALLED BY OBSERVER, BELOW
+;
+;  let lst map [one-of patches with [rgn.region-name = ?]] names
+;  if member? nobody lst [
+;    print "Error - an industry specified an undefined region as a market or production region"
+;    show lst
+;    stop   ;; this results in a run-time error if it is reached.  For the moment, that's okay!
+;  ]
+;  report lst
+;  
+;end
+;  
+
+;; ------------------------------------------------------------------------------------------------------
+
+;; sets the global variables with the paramenters for the auto industry.  Autos will be set up as
+;; industry number "ind". 
+;; This reporter returns a two-element list consising of (0) the list of market patches  
+;; and (1) the list of production parches, each ordered in the same order as the region names in 
+;; setting prodn-r and markt-r below.
+;;
+;; OBSERVER CONTEXT
+
+to-report setup-industry-autos [ ind ]
+  
+  set setup.ind.report-results? true
+  
+  set setup.ind.prune-by-region? false         ;; if false, prune by industry.
+  set setup.ind.biggest-loser-reporter "first frm.profit-forecast"
+  set setup.ind.max-industry-closers 0.20  ;; max proportion of firms in the industry.
+  set setup.ind.max-regional-closers 0.20  ;; max proportion of firms in any one region.
+  set setup.ind.shipment-min 1             ;; min shipment to any market.
+
+  set setup.ind.name "autos"
+  set setup.ind.label-size 0.40
+  set setup.ind.label-shape "car side"
+  set setup.ind.shape-color red
+  set setup.ind.label-offset [0.25 0.00]
+    
+  let prodn-r list-of-regions-with-names ["US" "GB" "SA"]
+  let markt-r list-of-regions-with-names ["US" "GB" "SA"]
+
+  set setup.mkt.size-list [1000 1000 1000]
+  set setup.mkt.price-response-list [50.0 50.0 50.0] ;; percent above Ptilda for share to fall to zero,
+  set setup.mkt.price-response-nfirms-list [5 5 5]      ;; at this number of firms supplying the market.
+  set setup.mkt.sigma-list [0.9 0.9 0.9]
+  set setup.mkt.P0-list [200.0 200.0 200.0]
+;;  set setup.mktslope-list [0.22 0.22 0.22]          ;; no longer matters as recalculated in setup?
+
+  set setup.mkt.sales-cost-max-discount-list [0.50 0.50 0.50]
+  set setup.mkt.sales-cost-free-ride-factor-list [0.05 0.05 0.05]
+  set setup.mkt.entry-cost-list [50000 40000 60000]
+  set setup.mkt.marketing-cost-rate-list [0.05 0.05 0.05]
+  set setup.mkt.marketing-cost-unit-charge-list [0.00 0.00 0.00]
+
+  set setup.db.initial-capacity-list [200 200 200]
+  set setup.db.initial-capital-list [500 500 500]
+  set setup.db.initial-capital-range-list [0 0 0]
+  set setup.db.initial-nfirms-list [1 1 1]
+
+  ;; these define the industry technology for each region.  In general we might expect alpha and 
+  ;; beta to be the same for all, but A (the technological "efficiency" constant) may vary 
+  ;; across regions.
+  set setup.db.pf-A-list [1.0 1.0 1.0]
+  set setup.db.pf-alpha-list [0.35 0.35 0.35]
+  set setup.db.pf-beta-list [0.65 0.65 0.65]
+  set setup.db.capacity-cushion-list [1.2 1.2 1.2]
+  set setup.db.depreciation-rate-list [0.05 0.05 0.05]
+  set setup.db.capacity-adj-factor-list [1.25 1.25 1.25]
+  set setup.db.K-adjustment-factor-list [0.5 0.5 0.5]
+  
+  set setup.db.are-costs-random-normal? true
+  set setup.db.pf-A-range-list [0 0 0]               ;; as absolute numbers.
+  set setup.db.pf-A-stddev-list [0.20 0.20 0.20]     ;; as absolute numbers.
+
+  set setup.db.firm's-profit-lookback-list [3 3 3]
+  set setup.db.region's-profit-lookback-list [6 6 6]
+  set setup.db.startup-cost-list [5 5 5]
+  set setup.db.interest-rate-list [-1 -1 -1]        ;; if -1, use the regional rate. 
+  set setup.db.fallow-period-list [3 3 3]
+  set setup.db.max-losers [4 4 4]
+  
+  set setup.db.shipments-lookback-list [4 4 4]
+  set setup.db.max-shipment-change-list [0.01 0.01 0.01]
+  set setup.db.minimum-export-list [2 2 2]
+  set setup.db.market-entry-payback-period-list [20 20 20]
+
+  set setup.db.model-firm-%tile-list [75 75 75]
+  set setup.db.biggest-loser-reporter-list ["first frm.profit-forecast" "first frm.profit-forecast" "first frm.profit-forecast"]
+
+  set setup.db.external-econ-lb-list [1.00 1.00 1.00]
+  set setup.db.external-econ-alpha-list [0.00 0.00 0.00]   ;; signals simple exponential response
+  set setup.db.external-econ-nstar-list [50 50 50]
+
+  report (list markt-r prodn-r)
+  
+end  ;; of setup-autos  
+
+;; ------------------------------------------------------------------------------------------------------
+
+;; ------------------------------------------------------------------------------------------------------
+
+;; sets the global variables with the paramenters for the steel industry.  Steel will be set up as
+;; industry number "ind". 
+;; This reporter returns a two-element list consising of (0) the list of market patches  
+;; and (1) the list of production parches, each ordered in the same order as the region names in 
+;; setting prodn-r and markt-r below.
+;;
+
+to-report setup-industry-steel [ ind ]
+  
+  set setup.ind.report-results? true
+
+  set setup.ind.prune-by-region? false         ;; if false, prune by industry.
+  set setup.ind.biggest-loser-reporter "first frm.profit-forecast"
+  set setup.ind.max-industry-closers 0.20  ;; max proportion of firms in the industry.
+  set setup.ind.max-regional-closers 0.20  ;; max proportion of firms in the region.
+  set setup.ind.profit-tolerance 0         ;; min value to which ind.profit-tolerance can be set.
+  set setup.ind.shipment-min 1             ;; min shipment to any market.
+    
+  set setup.ind.name "steel"
+  set setup.ind.label-size 0.30
+  set setup.ind.label-shape "wheel"
+  set setup.ind.shape-color red
+  set setup.ind.label-offset [-0.25 0.00]
+  
+  let prodn-r list-of-regions-with-names ["US" "GB" "MX"]
+  let markt-r list-of-regions-with-names ["US" "GB" "SA"]
+  
+  set setup.mkt.size-list [2000 1000 500]
+  set setup.mkt.price-response-list [50.00 50.00 50.00] ;; percent above Ptilda for share to fall to zero,
+  set setup.mkt.price-response-nfirms-list [5 5 5]      ;; at this number of firms supplying the market.
+  set setup.mkt.sigma-list [0.5 0.5 0.5]
+  set setup.mkt.P0-list [300.0 300.0 300.0]
+;  set setup.mkt.slope-list [3.0 3.0 3.0]             ;; no longer matters as recalculated in setup?
+
+  set setup.mkt.sales-cost-max-discount-list [0.50 0.50 0.50]
+  set setup.mkt.sales-cost-free-ride-factor-list [0.05 0.05 0.05]
+  set setup.mkt.entry-cost-list [50000 40000 60000]
+  set setup.mkt.marketing-cost-rate-list [0.05 0.05 0.05]
+  set setup.mkt.marketing-cost-unit-charge-list [0.00 0.00 0.00]
+
+  set setup.db.initial-capacity-list [180 180 180]
+  set setup.db.initial-capital-list [500 500 500]
+  set setup.db.initial-capital-range-list [0.00 0.00 0.00]
+  set setup.db.initial-nfirms-list [5 5 5]
+    
+  ;; these define the industry technology for each region.  In general we might expect alpha and 
+  ;; beta to be the same for all, but A (the technological "efficiency" constant) may vary 
+  ;; across regions.
+  set setup.db.pf-A-list [1.0 1.0 1.0]
+  set setup.db.pf-alpha-list [0.35 0.35 0.35]
+  set setup.db.pf-beta-list [0.65 0.65 0.65]
+  set setup.db.capacity-cushion-list [1.2 1.2 1.2]
+  set setup.db.depreciation-rate-list [0.05 0.05 0.05]
+  set setup.db.capacity-adj-factor-list [1.25 1.25 1.25]
+  set setup.db.K-adjustment-factor-list [0.5 0.5 0.5]
+      
+  set setup.db.are-costs-random-normal? false
+  set setup.db.pf-A-range-list [0.00 0.00 0.00]      ;; as absolute numbers.
+  set setup.db.pf-A-stddev-list [0.10 0.10 0.10]     ;; as absolute numbers.
+
+  set setup.db.firm's-profit-lookback-list [3 3 3]
+  set setup.db.region's-profit-lookback-list [6 6 6]
+  set setup.db.startup-cost-list [5 5 5]
+  set setup.db.interest-rate-list [-1 -1 -1]        ;; if -1, use the regional rate. 
+  set setup.db.fallow-period-list [3 3 3]
+  set setup.db.max-losers [4 4 4]
+  
+  set setup.db.shipments-lookback-list [4 4 4]
+  set setup.db.max-shipment-change-list [0.01 0.01 0.01]
+  set setup.db.minimum-export-list [2 2 2]
+  set setup.db.market-entry-payback-period-list [20 20 20]
+
+  set setup.db.model-firm-%tile-list [75 75 75]
+  set setup.db.biggest-loser-reporter-list ["first frm.profit-forecast" "first frm.profit-forecast" "first frm.profit-forecast"]
+  
+  set setup.db.external-econ-lb-list [1.00 1.00 1.00]
+  set setup.db.external-econ-alpha-list [0.00 0.00 0.00]   ;; signals simple exponential response
+  set setup.db.external-econ-nstar-list [50 50 50]
+  
+  report (list markt-r prodn-r)
+  
+end  ;; of setup-steel  
+
+;; ------------------------------------------------------------------------------------------------------
+

@@ -1,0 +1,257 @@
+; Procedures related to profits
+
+
+;; ------------------------------------------------------------------------------------------------------
+
+
+  
+  ; First a few note:  Costs are based on the firm's total output
+  ; and are allocated prorata among the firms shipments. Revenues are based on current sales.
+  ; We calculate two profit figures - expected profits on current shipments, and actual profits on 
+  ; current sales where the cost of sales is based on the cost of production of the shipments being 
+  ; sold. Profits, therefore are calculated on an acrual basis.
+  
+  ; Cash flow, on the other hand is the revenue from current sales less the cost of current production.
+  ; Thus it must be calculated after both sales and production have occured in any given period.
+
+;; ------------------------------------------------------------------------------------------------------
+
+to firm-update-after-shipments
+  
+  set frm.current-shipments sum [shpa.volume-shipped] of frm.shipment-agents
+  set frm.current-exports sum [shpa.volume-shipped] of frm.shipment-agents with [shpa.is-export-link?]
+  set frm.L my-hiring frm.current-shipments
+  
+  let SRTC my-total-cost-at-KL
+  set frm.current-total-cost SRTC
+  set frm.FC ([rgn.wageK] of frm.region-agent * frm.k)
+  set frm.MC my-SRMC frm.current-shipments
+  
+  let CS frm.current-shipments
+  ask frm.shipment-agents [
+    ; We allocate the total cost among the firm's shipments on a pro-rata basis. However,
+    ; current shipments can be zero if the firm finds that it is not profitable to ship to any
+    ; market. If that is so, set shp.cost-of-goods-shipped for the domestic market to SRTC, even 
+    ; though there are no goods sold.  That will make profit come out right.
+    ifelse CS > 0 [
+      set shpa.cost-of-goods-shipped SRTC * shpa.volume-shipped / CS
+    ]
+    [
+      set shpa.cost-of-goods-shipped ifelse-value shpa.is-export-link? [0] [SRTC]
+    ]
+    
+    ; If not in setup, we need to add market entry costs (if any).
+    if not (gbl.in-setup1? or gbl.in-setup2?) [
+      if shpa.is-export-link? AND shpa.volume-shipped > 0 AND shpa.volume-sold = 0 [
+        set shpa.cost-of-goods-shipped shpa.cost-of-goods-shipped + [mkt.entry-cost] of shpa.market
+      ]
+    ]
+    
+    ; if shpa.expected-netprice is gbl.NA, then shpa.volume-shipped will be zero, so we don't have to check
+    ; shpa.expected-netprice.  
+    set shpa.profit-on-shipments shpa.volume-shipped * shpa.expected-netprice - shpa.cost-of-goods-shipped
+  ]
+  
+  ; expected profit is not discounted for current market entry costs.
+  set frm.expected-profit sum [shpa.profit-on-shipments] of frm.shipment-agents
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+to firm-update-after-sales
+  
+  ;; FIRM CONTEXT
+  
+  set frm.current-sales sum [shpa.volume-sold] of frm.shipment-agents
+  
+  ; NOTE that shpa.netprice might be negative once the market actually clears.  It also might be
+  ; gbl.NA, in which case shpa.volume-sold should be zero.
+  ask frm.shipment-agents [ 
+    set shpa.revenue-on-goods-sold shpa.volume-sold * shpa.netprice
+    set shpa.profit-on-sales shpa.revenue-on-goods-sold - shpa.cost-of-goods-sold
+  ]
+  
+  set frm.current-revenue sum [shpa.revenue-on-goods-sold] of frm.shipment-agents
+  set frm.current-profit sum [shpa.profit-on-sales] of frm.shipment-agents
+
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+to-report neg-expected-profits-univariate [ q ]
+  
+  ; wraps neg-expected-profits to deal with the univariate case
+  
+  let qlist (list q)
+  report neg-expected-profits qlist
+  
+end
+;; ------------------------------------------------------------------------------------------------------
+
+to-report neg-expected-profits [ qlist ]
+
+  ; reports the (negative of) the firm's expected profits given the sales in each market given by qlist.
+  ; The entries in qlist are in the order of the markets in frm.profitmax-agentlist, which in turn is in
+  ; market number order.  Note that not all the firm's markets may be included in frm.profitmax-agentlist
+  ; if the shipments to some markets are fixed.  The sum of those fixed shipments will be in 
+  ; frm.fixed-q-total.  Note that we do not include the revenue from the fixed shipments as it is 
+  ; fixed and thus does not affect the change in SRTR with changes in shipments to other markets. 
+  ; Given increasing SRMC, however, fixed shipments do affect the change in SRTC with changes in the 
+  ; shipments to other markets.
+  ;
+  ; FIRM CONTEXT
+  
+  set qlist map [larger-of ? 0.0] qlist
+  let total-shipments frm.fixed-q-total + sum qlist
+  let SRTC my-SRTC total-shipments
+  
+  let plist (map [[provisional-mktprice-discounted-by-clearing ?1] of ?2] qlist frm.profitmax-agentlist)
+  set plist (map [[netprice-from-mktprice-discounted ?2] of ?1] frm.profitmax-agentlist plist)
+  
+  ; if price is gbl.NA then q will be zero.
+  let SRTR sum (map [?1 * ?2] plist qlist) 
+  
+;  show list qlist (- (SRTR - SRTC))
+
+  ; We report the negative of expected profits times a multiple, to hopefully make the approach to 
+  ; the minimum steeper, and thus easier for the solution method to find.
+  report 100 * (- (SRTR - SRTC)) 
+
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+to-report new-firm-expected-profit [ capacity A ]
+  
+  ; DATASTORE CONTEXT
+  
+  let expected-profit 0
+  ask firm-create-with-capacity capacity A [
+    set frm.is-dummy? true
+    firm-set-current-shipments
+    ask frm.shipment-agents [set shpa.volume-for-sale shpa.volume-shipped]
+    firm-update-after-shipments
+    set expected-profit frm.expected-profit
+    firm-close-down
+  ]
+  
+  report expected-profit
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+;to-report provisional-mktprice-by-elasticty [ Q mkt ]
+;  
+;  ; reports the price the firm expects to receive for the given shipments to the given market. In this
+;  ; version, the firm uses a perceived elasticity to relate a change in shipments to a change in 
+;  ; price, where the sales and mktprice of the prior period are the base.  NOTE that we use a partial
+;  ; arc elasticity here, in part to avoid a division by zero when Q comes in as 0.  But, if prior sales 
+;  ; are also zero, (Q - shp.volume-sold) will be zero, so return shp.mktprice.
+;  
+;  ; FIRM CONTEXT
+;  
+;  let exp-price 0
+;  ask out-shipment-to mkt [
+;;    let Qm (Q + shp.volume-sold) / 2
+;    let Qm Q
+;    set exp-price ifelse-value (Qm = 0) 
+;      [shp.mktprice]
+;      [shp.mktprice * (1 + ((Q - shp.volume-sold) / (Qm * shp.elasticity)))]
+;  ]
+;  
+;  report exp-price
+;  
+;end
+
+;; ------------------------------------------------------------------------------------------------------
+
+to-report provisional-mktprice-discounted-by-clearing [ Q ]
+  ; the shipment agent takes a provisional quantity to be sold, Q, and gives that quantity to the 
+  ; good's market. In return, it gets the price that would result if that quantity were sold in the 
+  ; market, assuming given quantities to be sold of all the other firms in the market. (Those given 
+  ; q's may depend on the Q of this shipment agent - see "reaction-to-my-Q".
+  
+  ; SHIPMENT LINK AGENT CONTEXT
+  
+  let competitors other turtle-set [my-in-shipment-agents] of shpa.market
+  
+  ; find the quantities other firms will offer based on the quantity, Q, to be offered by this shipment
+  ; agent, then put Q at the beginning of that list of quantities.
+  let qlist [reaction-to-my Q] of competitors
+  set qlist fput Q qlist
+  
+  ; NOTE that using clr- vs. clear-the-market means that the value of shp.volume-sold is not updated.
+  ; So, when the firm uses this in setting its shipments, other firms do not see any of the quantities
+  ; it has tried.  Thus each firm's decisions about trial q's are independent of the other firms' trials.
+  let plist [clr-the-market qlist get-alphas qlist] of shpa.market
+  
+  ; the price comes back as the first price in plist. discount that price for entry costs, etc., and 
+  ; return it. shpa.volume-sold reflects past sales, not the trial quantity.
+  report mktprice-discounted first plist Q shpa.volume-sold
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+to-report reaction-to-my [ Q ]
+  
+  ; SHIPMENT LINK AGENT CONTEXT
+  
+  let their% 0
+  let mybase [shpa.volume-sold] of myself
+  if mybase != 0 [
+    let my% (Q - mybase) / mybase
+    set their% my% * [ind.follow-me] of shpa.ind-agent / 100
+  ]
+  
+  let theirQ larger-of 0 ((1.0 + their%) * shpa.volume-sold)
+  report theirQ
+  
+end
+  
+;; ------------------------------------------------------------------------------------------------------
+
+to-report mktprice-discounted [ mktprice sales sales-base ]
+  
+  ; The market price is first discounted by sales costs, which, for now, apply to exports on a per-
+  ; market basis.
+  ; Then the market price received by the firm may be additionally discounted if firm shipments to this 
+  ; market are markedly higher or lower than they were the previous period as there are costs 
+  ; involved in "sudden" increases or decreases in sales. 
+
+  ; SHIPMENT LINK AGENT CONTEXT
+  
+  ; Check for mktprice being NA.
+  if mktprice = gbl.NA [ report mktprice ]
+
+  ; First, apply the sales cost discount. DO WE NEED TO WORRY ABOUT A NEGATIVE PRICE?
+  let mp mktprice * (1.0 - shpa.marketing-cost-rate) - shpa.marketing-cost-unit-charge
+  
+  ; Then apply the discount related to the change in sales.  But,
+  ; if we are in the first setup stage, or this is a dummy firm, there is no change to discount.
+  if gbl.in-setup1? or [frm.is-dummy?] of shpa.firm [ report mp ]
+  
+  ; Check for sales-base <= 1. In that case there is no additional discount for volume changes.
+  ; (This should also prevent Gauss from possibly being passes a very small w.)
+  if sales-base <= 1 [ report mp ]
+  
+  ; We use the Gauss function to figure the discount.  The function has a height at the center
+  ; of unity and tails off to shpa.sales-cost-max-discount at + and - infinity.  The function 
+  ; is centered at the firm's current level of sales, and the distance between the center and
+  ; one standard deviation from the center is given by the larger of:
+  ;  1) shpa.sales-cost-free-ride-factor times total sales in the market, or 
+  ;  2) half of this firm's current sales to the market, 
+  ; Thus sales that differ from one standard deviation from the firm's current sales will have 
+  ; a discount of 1.0 - 0.61 = 39% of the maximum discount. (0.61 is the height of the curve at 
+  ; one standard deviation from the center.)
+  ; Since sales-base must be > 1, w too should be > 1 even if mkt.total-sales = 0. 
+  let w shpa.sales-cost-free-ride-factor * [mkt.shipments] of shpa.market
+  set w larger-of (sales-base / 2) w
+;  if w <= 0 [show (list end2 w-min sales-base)]
+  report mp * Gauss sales 1.0 (1.0 - shpa.sales-cost-max-discount)  sales-base w
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------

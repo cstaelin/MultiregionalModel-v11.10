@@ -1,0 +1,474 @@
+;; THESE PROCEDURES SHOULD BE THE ONLY ONES IN THE MODEL THAT CONTAIN DEMAND-CURVE SPECIFIC 
+;; INFORMATION.  THUS OTHER PROCEDURES CALL THESE WHEN THEY NEED A PRICE, QUANTITY, OR ANY OTHER
+;; PIECE OF DATA THAT IS DERIVED FROM THE DEMAND CURVE.
+
+;; ------------------------------------------------------------------------------------------------------
+;; ------------------------------------------------------------------------------------------------------
+;; ------------------------------------------------------------------------------------------------------
+;; ------------------------------------------------------------------------------------------------------
+
+to-report clr-the-market-CES [ qlist ]
+  
+  ; Sets the market prices at which each firm can sell the quantity given in qlist the market
+  ; given by mkt.  (If the quantity is zero, the corresponding price is set to gbl.NA.)
+  
+  ; MARKET CONTEXT
+  
+  ;; First using the list of all the shipment links to this market, gather the quantities to be sold 
+  ;; by all the firms in this industry, then take the sum as the total that needs to be sold.  We 
+  ;; then find the market price at which this quantity can be sold.  In this version that gives 
+  ;; us mkt.Phat.
+  ;; THERE BETTER NOT BE ANY QUANTITIES IN QLIST THAT ARE < 0!!  So we check for it below.
+  set qlist map [larger-of ? 0.0] qlist
+  if not empty? (filter [? < 0] qlist) [show word "Clear-the-market was passed a negative quantity." qlist kickout]
+  let nn length qlist
+  let plist []
+  
+  let S sum qlist
+  let mktprice market-price S self
+  
+  ifelse (mktprice = 0) [
+    ; Total sales are greater than the capacity of the market to absorb them at a positive average
+    ; price.  So, set all prices to zero.
+    set plist n-values nn [0]
+  ]
+  [
+    ifelse (S = 0) [
+      ;; There are no intended sales in this market, set all the market prices to gbl.NA.
+      set plist n-values nn [gbl.NA]
+    ]
+    [
+      ;; S is > 0.  Calculate the prices at which each firm can sell its quantity to be sold. 
+      ;; First find the number of active firms.  If there is only 1, then its q must be equal to the S 
+      ;; we calculted above.  We set its price to Phat.
+      ;; First make a list of the q's > 0 and their associated indices in qlist, and set n.  We know 
+      ;; that since the sum > 0, there must be at least one non-zero value.
+      let alist positions-where-not-equal 0 qlist
+      let aqlist remove 0 qlist
+      let n length aqlist
+      
+      ifelse (n = 1) [
+        set plist n-values nn [gbl.NA]
+        set plist replace-item (position S qlist) plist mktprice
+      ]
+      [
+        ;; Otherwise we calculate the individual prices, P(i), for firms with q > 0 and 
+        ;; set P(i) to gbl.NA for the others. 
+        ;; aqlist is the list of q's for firms with q > 0
+        ;; Here is where we need to solve a set of simultaneous equations, so we set up two matrices,
+        ;; A and B, to solve for P where A*P = B. A is nxn, and B and P are nx1.
+        ;; Begin by calculating the shares:
+        let shares map [? / S] aqlist
+        
+        ;; Now set up matrix A by constructing a list of its rows, creating the matrix, and then 
+        ;; (re)setting the diagonal elements of the first n-1 rows.
+        let minus1/n-1 (-1 / (n - 1))
+        let row n-values n [minus1/n-1]
+        let rowlist n-values (n - 1) [row]
+        set rowlist lput shares rowlist
+        let A matrix:from-row-list rowlist
+        foreach (n-values (n - 1) [?]) [matrix:set A ? ? 1]
+        ;;      show A
+        
+        ;; Then setup matrix B by constructing its single column.  Note that it must be a nested list
+        ;; with one sublist.
+        let beta mkt.beta 
+        let one/n (1 / n)
+        let blist map [((one/n) - (? / S)) / beta] but-last aqlist
+        set blist lput mktprice blist
+        let col []
+        set col fput blist col
+        ;;      show col
+        let B matrix:from-column-list col
+        ;;      show B
+        
+        ;; Finally, solve for P and put the results in an unnested list.
+        let P matrix:solve A B
+        let aplist first matrix:to-column-list P
+        ;;      show aplist
+        
+        ;; Check for any P <= 0.
+        ;      if not empty? (filter [? <= 0] aplist) [
+        ;        show "Clear-the-market generated a price <= 0." 
+        ;        show word "aplist: " aplist
+        ;        show word "aqlist: " aqlist
+        ;        kickout
+        ;      ]
+        
+        ;; Finally create a plist consistant with qlist.
+        set plist n-values nn [gbl.NA]
+        ;; There is likely a more efficient way of doing this ...
+        (foreach alist aplist [set plist replace-item ?1 plist ?2])
+      ]
+    ]
+  ]
+  
+  report plist
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+to-report marginal-revenue [ Q ]
+  
+  ; reports the firm's marginal revenue in a given market.  The firm and market are those at either end
+  ; end of this shipment link.
+  ;
+  ; SHIPMENT AGENT CONTEXT
+  
+  let delta 0.25
+  
+  let Q1 larger-of 0 (Q - delta)
+  let Q2 Q + delta
+  
+  let P1 netprice-from-mktprice-discounted (provisional-mktprice-discounted-by-clearing Q1)
+  let P2 netprice-from-mktprice-discounted (provisional-mktprice-discounted-by-clearing Q2)
+  
+  report (Q2 * P2 - Q1 * P1) / (Q2 - Q1)
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+to-report firm's-price-n [ q frm mkt n ] 
+  
+  ;; reports the firm's market price in a given market as a function of the firm's (intended) sales in that 
+  ;; market and the expected number of firms in the market.  mkt.total-sales is taken as given.
+  ;;
+  ;; Note that if n = 1, this is the only firm in the market and the firm's price is the market price at
+  ;; which its entire quantity can be sold.
+  ;;
+  ;; NO CONTEXT ASSUMED
+
+  if (n = 1) [ report market-price q mkt ]
+  
+  ;; get p-tilda, mkt.total-sales and mkt.beta for this firm and market.
+  let p-tilda [shpa.p-tilda] of shipment-agent-from-to frm mkt
+  let S [mkt.total-sales] of mkt
+  let b [mkt.beta] of mkt
+  
+  let nb n * b
+  let Sb S * b
+  let P (1 / nb) + p-tilda - (q / Sb)
+  
+  report larger-of P 0
+  
+  
+end  ;; of firm's-price-n
+
+;; ------------------------------------------------------------------------------------------------------
+;; ------------------------------------------------------------------------------------------------------
+
+to-report firm's-price-n-old [ q frm mkt n ] 
+  
+  ;; reports the firm's market price in a given market as a function of the firm's (intended) sales in that 
+  ;; market and the expected number of firms in the market.  mkt.size is taken as given.
+  ;;
+  ;; Note that if n = 1, this is the only firm in the market and the firm's price is the market price at
+  ;; which its entire quantity can be sold.
+  ;;
+  ;; NO CONTEXT ASSUMED
+
+  if (n = 1) [ report market-price q mkt ]
+  
+  ;; get p-tilda, mkt.size and mkt.beta for this firm and market.
+  let p-tilda [shpa.p-tilda] of shipment-agent-from-to frm mkt
+  let S [mkt.size] of mkt
+  let b [mkt.beta] of mkt
+  
+  let nb n * b
+  let Sb S * b
+  let P (1 / nb) + p-tilda - (q / Sb)
+  
+  report larger-of P 0
+  
+  
+end  ;; of firm's-price-n
+
+;; ------------------------------------------------------------------------------------------------------
+
+;; Reports the firm's market price as a function of the firm's (intended) sales in that market.
+;; It uses firm's-price-n to do the work with the value of mkt.suppliers passed as value of n.
+;;
+;; NO CONTEXT ASSUMED
+
+to-report firm's-price [ q frm mkt ]
+  
+   let n [mkt.suppliers] of mkt
+   report firm's-price-n q frm mkt ifelse-value (n > 0) [n] [1]
+  
+end  ;; of firm's-price
+  
+;; ------------------------------------------------------------------------------------------------------
+
+;; reports the firm's market price as a function of its intended sales in that market, recognizing that
+;; it's price will affect total market sales.  We arrive at this price using zeroin.
+;; (Note that this will take some programming and we have thus put it off for a while.  In the mean time
+;; the procedure simply calls firm's-price-n.)
+;;
+;; NO CONTEXT ASSUMED
+
+to-report firm's-price-n-with-market-response [ q frm mkt n ]
+  
+  report firm's-price-n q frm mkt n
+  
+end  ;; of firm's-price-n-with-market-response
+
+;; ------------------------------------------------------------------------------------------------------
+
+;to-report firm's-quantity [ mkt-price frm mkt ]
+;  
+;  ;; reports the quantity sold by a firm in a given market as a function of the firm's market price.
+;  ;; (We do not use the corresponding link's shp.mktprice here, but allow any price to be passed.)
+;  ;; Assumes that total demand (mkt.total-sales) has already been determined.
+;  ;; Thus this procedure simply determines the firm's share, based on its price and the average price 
+;  ;; of the other firms.
+;  ;;
+;  ;; Note that we need a way for the firm to "refuse" sales.  Since Ptilda may have changed since the 
+;  ;; firm set the price that it thought would yield zero sales, simply using that price may result in
+;  ;; actual sales greater than zero.  Thus, if shp.volume-to-be-sold is zero, we return zero rather than 
+;  ;; going on to calculate sales.
+;  ;;
+;  ;; NO CONTEXT ASSUMED
+;  
+;  ; *****************************************************************************************************
+;  ; ASSUMES THAT mkt.total-sales HAS ALREADY BEEN SET USING THIS SAME mkt-price INPUT.  OTHERWISE WILL
+;  ; FAIL TO TAKE INTO ACCOUNT THE IMPACT OF THE FIRM'S PRICE ON TOTAL MARKET DEMAND.
+;  ; AT THE MOMENT, THIS PROCEDURE IS NOT USED, NOR IS shipment-volume-from-link BELOW.
+;  ; *****************************************************************************************************
+;  
+;  let n [mkt.suppliers] of mkt
+;  
+;  ;; if n = 1, this is the only firm and it gets the whole market demand.
+;  if (n = 1) [ report ([mkt.total-sales] of mkt) ]
+;  
+;  let shpmnt shipment-from-to frm mkt
+;  
+;  ;; if intended sales are zero, the firm just won't sell.
+;  if (([shpa.volume-for-sale] of shpmnt) = 0) [ report 0 ]
+;  
+;  ;; otherwise find p-tilda for this firm in this market, then the firm's share.
+;  let p-tilda [shpa.p-tilda] of shpmnt
+;  let share (1 / n) - [mkt.beta] of mkt * (mkt-price - p-tilda)
+;  
+;  report larger-of (share * [mkt.total-sales] of mkt) 0
+;  
+;end  ;; of firm's-quantity
+
+;;; ------------------------------------------------------------------------------------------------------
+
+;to-report firm's-quantity-old [ mkt-price frm mkt ]
+;  
+;  ;; reports the quantity sold by a firm in a given market as a function of the firm's market price.
+;  ;; (We do not use the corresponding link's shp.mktprice here, but allow any price to be passed.)
+;  ;; Assumes that total demand (mkt.size) has already been determined.
+;  ;; Thus this procedure simply determines the firm's share, based on its price and the average price 
+;  ;; of the other firms.
+;  ;;
+;  ;; Note that we need a way for the firm to "refuse" sales.  Since Ptilda may have changed since the 
+;  ;; firm set the price that it thought would yield zero sales, simply using that price may result in
+;  ;; actual sales greater than zero.  Thus, if shp.volume-to-be-sold is zero, we return zero rather than 
+;  ;; going on to calculate sales.
+;  ;;
+;  ;; NO CONTEXT ASSUMED
+;  
+;  ; *****************************************************************************************************
+;  ; ASSUMES THAT MKT.SIZE HAS ALREADY BEEN SET USING THIS SAME mkt-price INPUT.  OTHERWISE WILL
+;  ; FAIL TO TAKE INTO ACCOUNT THE IMPACT OF THE FIRM'S PRICE ON TOTAL MARKET DEMAND.
+;  ; AT THE MOMENT, THIS PROCEDURE IS NOT USED, NOR IS shipment-volume-from-link BELOW.
+;  ; *****************************************************************************************************
+;  
+;  let n [mkt.suppliers] of mkt
+;  
+;  ;; if n = 1, this is the only firm and it gets the whole market demand.
+;  if (n = 1) [ report ([mkt.size] of mkt) ]
+;  
+;  let shpmnt shipment-from-to frm mkt
+;  
+;  ;; if intended sales are zero, the firm just won't sell.
+;  if (([shpa.volume-for-sale] of shpmnt) = 0) [ report 0 ]
+;  
+;  ;; otherwise find p-tilda for this firm in this market, then the firm's share.
+;  let p-tilda [shpa.p-tilda] of shpmnt
+;  let share (1 / n) - [mkt.beta] of mkt * (mkt-price - p-tilda)
+;  
+;  report larger-of (share * [mkt.size] of mkt) 0
+;  
+;end  ;; of firm's-quantity
+
+;; ------------------------------------------------------------------------------------------------------
+;; ------------------------------------------------------------------------------------------------------
+
+;to-report shipment-volume-from-link
+;  
+;  ;; reports the shipment volume for this link from the firm (at end1) to the market (at end2). 
+;  ;;
+;  ;; SHIPMENT LINK CONTEXT
+;  
+;  report firm's-quantity shp.mktprice end1 end2
+;  
+;end  ;; of shipment-volume-from-link
+
+;; ------------------------------------------------------------------------------------------------------
+
+;; reports the Pbar that would result from the given p-tilda and the firm's setting a market price
+;; of P, all in market mkt.  If n = 1, this is the only firm in the market and Pbar = P.
+;;
+;; NO CONTEXT ASSUMED
+
+to-report Pbar-from-Ptilda [ P p-tilda n ]
+  
+  report ( ((n - 1) * p-tilda) + P ) / n
+  
+end  ;; of Pbar-from-Ptilda
+
+;; ------------------------------------------------------------------------------------------------------
+
+;to set-elasticities-x
+;  
+;  ; sets the elasticity of demand for this firm in this market, given the firm's current market
+;  ; price and quantity sold, and total market sales.  Note that as q --> 0, elasticity --> - infinity.
+;  ;
+;  ; SHIPMENT LINK CONTEXT
+;  
+;  let P shp.mktprice
+;  ifelse P = gbl.NA [
+;    ; this firm is new to the market. ask the market to give a list of all active suppliers, and
+;    ; then find those in the same region as this firm.
+;    let all-active no-turtles
+;    ask end2 [ set all-active my-in-shipments with [(shp.mktprice != gbl.NA) and (shp.volume-sold > 0)] ]
+;    show all-active
+;    let local all-active with [(end1 = [end1] of myself)]
+;    set shp.elasticity ifelse-value (any? local) [mean [shp.elasticity] of local][mean [shp.elasticity] of all-active]
+;  ]
+;  [
+;    let q shp.volume-sold
+;    ifelse q <= gbl.tiny [
+;      set shp.elasticity (- gbl.BIG)
+;    ]
+;    [
+;      let elasticity 0
+;      ask end2 [
+;        let x q * (mkt.total-sales ^ (- (1 + mkt.sigma))) / (mkt.sigma * mkt.slope)
+;        set elasticity ( - P) * (x + (mkt.total-sales * mkt.beta / q))
+;      ]
+;      set shp.elasticity elasticity
+;;      show shp.elasticity
+;    ]
+;  ]
+;  
+;end
+
+;; ------------------------------------------------------------------------------------------------------
+
+to-report market-demand-here
+  
+  ;; reports the demand in the calling market, using the data already recorded for the market.
+  ;;
+  ;; MARKET CONTEXT
+
+  report market-demand mkt.Phat self
+  
+end  ;; of market-demand-here
+
+;; ------------------------------------------------------------------------------------------------------
+
+to-report market-demand [ P mkt ]
+  
+  ;; reports total market demand given the "market price", P.
+  ;;
+  ;; NO CONTEXT ASSUMED
+  
+  let S (([mkt.P0] of mkt - P) / [mkt.slope] of mkt) ^ (1 / [mkt.sigma] of mkt)
+  
+  report larger-of S 0
+  
+end  ;; of market-demand
+
+;; ------------------------------------------------------------------------------------------------------
+
+;; reports the market price corresponding to total market demand of S
+;;
+;; NO CONTEXT ASSUMED
+
+to-report market-price [ S mkt ]
+  
+  report larger-of ([mkt.P0] of mkt - ([mkt.slope] of mkt) * (S ^ [mkt.sigma] of mkt)) 0
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+;; calibrates the market demand equation to yield a quantity of mkt.size at a price 
+;; equal to mkt.Phat by setting the appropriate value of mkt.slope.
+;; mkt.sigma and mkt.P0 are assumed to be given.  It is possible during setup that Phat could be 
+;; greater than P0 and if that were so, slope would have the wrong sign.  In that case, we make no
+;; change to mkt.slope.
+;;
+;; MARKET CONTEXT
+
+to set-market-slope [ mktsize phat ]
+  
+  if (mkt.P0 > phat) [
+    set mkt.slope (mkt.P0 - phat) / (mktsize ^ mkt.sigma)
+  ]
+
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+;; ------------------------------------------------------------------------------------------------------
+
+;; reports the change in the average price of other firms that the firm expects to result from a change
+;; in its price, i.e., the derivative of p-tilda wrt the firm's price, P.
+;; For the moment, we simply assume that the reaction is zero.  The firm assumes that there will be 
+;; none.
+;;
+;; NO CONTEXT ASSUMED
+
+to-report RF
+  
+  report 0
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+;; sets the beta of the calling market based on the desired price response, the number of suppliers,
+;; and the market price.  Note that if either n or P turns out to be zero, we do not change the current 
+;; value of beta.  (And we'd get an error if we did.)  Note too that mkt.price-response is in %.
+;;
+;; MARKET CONTEXT ASSUMED
+
+to set-market-beta [ suppliers Phat ]
+  
+  let n ifelse-value (suppliers <= 0) [mkt.suppliers] [suppliers]
+  let P ifelse-value (Phat <= 0) [mkt.Phat] [Phat]
+  
+  if (n > 0) and (P > 0) [  
+    set mkt.beta (1 / (n * (mkt.price-response / 100) * P))
+  ]
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+;;; returns the directed link from agent a to agent b.
+;
+;to-report shipment-from-to [ a b ]
+;  
+;  report shipment [who] of a  [who] of b
+;  
+;end
+
+;; ------------------------------------------------------------------------------------------------------
+
+;; returns the shipment agent for the directed link from agent a to agent b.
+
+to-report shipment-agent-from-to [ a b ]
+  
+  report [shpl.shipment-agent] of shipment [who] of a  [who] of b
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------

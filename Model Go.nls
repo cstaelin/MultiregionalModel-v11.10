@@ -1,0 +1,591 @@
+;; This file contains all the go-button procedures, including "to go" itself.
+;;
+;; ------------------------------------------------------------------------------------------------------
+;;                          "GO" PROCEDURES
+;; ------------------------------------------------------------------------------------------------------
+;; ------------------------------------------------------------------------------------------------------
+;; ------------------------------------------------------------------------------------------------------
+
+to behaviorspace-table-go
+  
+  if not gbl.setup-stable? [
+    output-print "No stable setup from which to begin."
+    stop
+  ]
+  
+  set gbl.current-period (gbl.current-period + 1)
+  ask worlds [advance-one-period ]
+  tick
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+to profile-run [ option ]
+  
+ ifelse (option = gbl.profile-start) [
+    profiler:start
+  ]
+  [
+    ifelse (option = gbl.profile-end) [
+    profiler:stop
+    if file-exists? gbl.run-profile [file-delete gbl.run-profile]
+    file-open gbl.run-profile
+    file-print profiler:report
+    file-close 
+    profiler:reset
+    print (word "The Profiler has written the setup profile to " gbl.run-profile ".")
+    ]
+    [
+      throw-error "Invalid profiler option."
+    ]
+  ]
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+;; ------------------------------------------------------------------------------------------------------
+;; ------------------------------------------------------------------------------------------------------
+
+to-report run-for [ periods seek-pattern?]
+
+  ; runs the model for the specified number of periods. can be called by Behavior Space.
+  ;
+  ; OBSERVER CONTEXT
+  
+  if gbl.profile? and not gbl.in-setup2? [profile-run gbl.profile-start]
+  
+  set periods ifelse-value (periods = 0) [gbl.max-periods] [periods]
+  repeat periods [
+    set gbl.current-period (gbl.current-period + 1)
+    ask gbl.world-agent [ advance-one-period ]
+    
+    tick
+    
+    if seek-pattern? [
+      let pattern? true
+      let pattern-setup? false
+      ask [wld.industries] of gbl.world-agent [ 
+        set ind.pattern-list pattern-set-list ind.pattern-list 
+        set pattern? pattern? AND (ifelse-value (%pattern-find-in ind.pattern-list 1 gbl.pattern-length-needed gbl.pattern-%-needed > 0) [true] [false])
+      ]
+      if pattern? [ 
+        if gbl.profile? and not gbl.in-setup2? [profile-run gbl.profile-end]
+        report pattern?
+      ]
+    ]
+  ]
+  
+  if gbl.profile? and not gbl.in-setup2? [profile-run gbl.profile-end]
+  report false
+
+end
+;; ------------------------------------------------------------------------------------------------------
+;; ------------------------------------------------------------------------------------------------------
+;; ------------------------------------------------------------------------------------------------------
+
+
+to advance-one-period
+  
+  ;; This procedure moves the clock forward one period.  At the begining of the period, last period's 
+  ;; shipments arrive in the markets and are sold, determining this period's prices in each market 
+  ;; and thus the firms' revenues.  Firms then use the prices from previous periods, and potentially 
+  ;; from this period as well, to determine this period's shipments to each market, and therefore their
+  ;; production and employment levels, and costs. 
+  ;; 
+  ;; As this period's prices/sales may figure into this period's production decisions, we need to clear
+  ;; the markets first.  We then see if any firms will fail based on their past profits.  (In fact they
+  ;; fail at the beginning of the period since they do not use this period's prices in their decision. 
+  ;; But since they may have shipments in the pipeline, we do not want them, and thus their shipments
+  ;; to disappear before the markets clear.)  We next allow the remaining firms to adjust their 
+  ;; capacities, figure the external economies in each region, and ask the firms to set their shipments
+  ;; to each market.  With all this information we can then calculate the firms' profits and update 
+  ;; their histories (and any other histories we have).  Finally, we allow new firms to enter the 
+  ;; industry if the right conditions are met.
+  ;;
+  ;; WORLD CONTEXT
+  
+
+;  if gbl.go-report? [display-separator]
+  
+  ;; At the moment, we deal with one industry at a time, serially.  Use ask-concurrent?  But with
+  ;; no industry interdependence, it makes no difference.
+  ask wld.industries [
+    
+    ;; First, allow firms to adjust their capacities and allow new firms to be created.
+    ;; These operations should really be done at the end of the previous period, 
+    ;; but is messes up the reporting of that period.  Therefore we do them here based
+    ;; entirely on last period's data, and we skip it entirely for the first n periods.
+    
+    ;; Allow all the existing firms to adjust their capacities based upon their past
+    ;; shipments.
+    ask ind.firm-set [firm-adjust-capacity]
+    
+    ;; Allow each region to create new firms.
+    ;; firm-add-new allows only one new firm, and only if that firm would be profitable,
+    ;; thus the check for "nobody".
+    if (gbl.current-period > 1 AND gbl.allow-new-firms?) [
+      ask ind.markets [ set mkt.supplier-added? false ]
+      ask ind.localities [
+        set lcl.producer-added? false
+        let new-firm firm-add-new
+        if new-firm != nobody [
+          set-initial-cash-balance new-firm
+        ]
+      ]
+    ]
+
+    ;; Clear the markets with the shipments of the previous period by making the previous shipments
+    ;; available for sale.
+    ask ind.firm-set [
+      ask frm.shipment-agents [
+        set shpa.volume-for-sale shpa.volume-shipped
+        set shpa.cost-of-goods-for-sale shpa.cost-of-goods-shipped
+      ]
+    ]
+    ask ind.markets [ 
+      clear-the-market-q
+      market-history-update
+    ]
+    
+    ;; and have the firms update their shipment links and with the prices received. 
+    ask ind.firm-set [ firm-update-after-sales ]
+    
+    ; If we are not in the second stage of setup, make any requested policy changes before 
+    ; firms make decisions.
+    if not gbl.in-setup2? [
+      ask worlds [ scheduler:perform-scheduled-tasks wld.policy-schedule gbl.current-period ]
+    ]
+    
+    ; If transport costs have changed since the previous period, update all the shipment links.
+    ; NOTE that by putting this here, it assumes that firms had shipment contracts for last
+    ; period's shipments at the old rates as shp.netprice from current sales reflects
+    ; those old rates.
+    if ind.transport-cost != ind.transport-cost-prior [
+      ask ind.firm-set [
+        ask frm.shipment-agents [
+          set shpa.unit-freight-cost (([ind.transport-cost] of shpa.ind-agent) * shpa.distance)
+        ]
+      ]
+      set ind.transport-cost-prior ind.transport-cost
+    ]
+    
+    ; if we are using profits to prune firms, then we do it here, after their current sales
+    ; and therefore after current revenue has been determined.
+    ; If we are using cash balances to prune firms, then we also do it here.  Although we will be 
+    ; using the prior period's cash balance and ignoring sales in the current period, we will 
+    ; have allowed the goods they have produced to clear the market, and will get rid of the
+    ; firms before other firms make their production decisions, which do depend on the number of
+    ; other firms in the market.
+    industry-prune
+       
+    ;; Stop if there are no firms left in the industry.    
+    if not any? ind.firm-set [
+      print-message gbl.cmd (word "Industry " ind.name " has no firms left!")
+;      stop
+    ]
+    
+    ;; Gather the capacity stats for each region.
+    ask ind.localities [capacity-data-update]
+
+    ;; Finally, ask each region to have its firms set their future sales (shipments) to each market.
+    ask ind.localities [
+      ;; First evaluate the external economies factor based on the number of firms that had positive
+      ;; shipments in the previous period. 
+      ;; This will not include firms that were newly created as their frm.current-shipments will be zero.
+      let active-firm-n count (lcl.firm-set with [frm.current-shipments > 0])
+      set lcl.external-econ-factor external-economies active-firm-n
+      
+      ; ask all firms to set their technological constant, A0, based on the external economy 
+      ; and then to set their current shipments to each market for next period's sales.
+      ask lcl.firm-set [ 
+        set frm.A (frm.A0 * [lcl.external-econ-factor] of myself)
+        firm-set-current-shipments
+      ]
+    ]
+    
+    ;; Do some housekeeping.
+    ask ind.firm-set [
+      firm-update-after-shipments
+      set frm.cash-flow frm.current-revenue - frm.current-total-cost - frm.market-entry-costs
+      set frm.cash-balance frm.cash-balance + frm.cash-flow
+      firm-history-update
+      ask frm.shipment-agents [shipment-history-update]
+    ]
+    
+    ask ind.localities [
+      locality-update
+      locality-history-update
+    ]
+    ask ind.labels [label-update]
+    update-trade-data
+    
+  ]  ;; end of the industry's tasks
+
+  ; do the reporting and plotting of the results.
+  ; note that we suspend the RNG so that the model results will be independent of output.
+  with-local-randomness [
+;    if gbl.go-report? [ ask wld.industries [display-results] ]
+    ask wld.industries [ plots-update ]
+    if (gbl.write-to-file? and not gbl.in-setup2?) or (gbl.in-setup2? and gbl.write-setup-to-file?) [
+      write-output-to-file gbl.current-period
+    ]
+  ]
+  display
+  
+end  ;; of advance-one-period
+
+;; ------------------------------------------------------------------------------------------------------
+
+;; ------------------------------------------------------------------------------------------------------
+
+to set-initial-cash-balance [ new-firm ]
+  ; Set the initial cash balance to a multiple of the average SRTC of firms in this region, or in the 
+  ; world, if there are none in this region.
+  
+  ; DATASTORE CONTEXT
+  
+  let icb 0
+  ifelse any? lcl.firm-set [
+    set icb lcl.initial-cash-balance * mean [frm.current-total-cost] of lcl.firm-set
+  ]
+  [
+    set icb lcl.initial-cash-balance * mean [frm.current-total-cost] of ([ind.firm-set] of lcl.ind-agent)
+  ]
+  
+  ask new-firm [
+    set frm.cash-balance icb
+  ]
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+;; ------------------------------------------------------------------------------------------------------  
+;; ------------------------------------------------------------------------------------------------------ 
+
+;; Updates the Pbar and number of active suppliers for the calling market.  
+;; Actively selling firms are those with shp.volume-for-sale >= 0.  This might be different from
+;; shp.volume-sold > 0 and shp.volume-shipped > 0, depending on when this procedure is called.
+;; If there are no firms selling in this market, then set mkt.Pbar to gbl.NA.
+;;
+;; Note that clear-the-market sets these same variables.  Therefore there is no need to call it after
+;; clearing the market unless something else has changed, such as the number of firms.
+;;
+;; MARKET CONTEXT
+
+to market-update
+  
+  let active-shipments my-in-shipment-agents with [shpa.volume-for-sale > 0]
+  set mkt.suppliers count active-shipments
+  
+  ifelse (mkt.suppliers > 0) [
+    ;; Calculate mkt.Pbar from the active firms.
+    set mkt.Pbar mean ([shpa.mktprice] of active-shipments)
+  ]
+  [
+    set mkt.Pbar gbl.NA
+  ]  
+  
+end  ;; of update-market
+
+;; ------------------------------------------------------------------------------------------------------ 
+;; ------------------------------------------------------------------------------------------------------
+;; ------------------------------------------------------------------------------------------------------ 
+;; ------------------------------------------------------------------------------------------------------
+
+to capacity-data-update
+  
+  ; DATASTORE CONTEXT
+  
+  ;; Gather the capacity stats for this region.
+  set lcl.capacity-data []
+  if lcl.firm-n > 0 [
+    set lcl.capacity-data fput (ifelse-value (lcl.firm-n > 1)
+      [standard-deviation [frm.capacity] of lcl.firm-set] [0]) lcl.capacity-data
+    set lcl.capacity-data fput (max [frm.capacity] of lcl.firm-set) lcl.capacity-data
+    set lcl.capacity-data fput (median [frm.capacity] of lcl.firm-set) lcl.capacity-data
+    set lcl.capacity-data fput (min [frm.capacity] of lcl.firm-set) lcl.capacity-data
+    set lcl.capacity-data fput (mean [frm.capacity] of lcl.firm-set) lcl.capacity-data
+  ]
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+;; Constructs and saves regional aggregates of firm-level data of the firms producing in a given region.
+;; In general, only firms with positive gross shipments are included in the aggregates.  However, if 
+;; there are firms in the region but none has positive gross shipments, then the aggregates are for 
+;; all firms in the region.  If there are no firms at all, most of the aggregates are simply set to
+;; zero.
+;;
+;; LOCALITY CONTEXT, CALLED BY AN INDUSTRY
+
+to locality-update
+  
+  ;; check for any inconsistancy in the firm count.
+  if lcl.firm-n != count lcl.firm-set [
+    throw-error (word "Number and set of firms in region " lcl.name " are out of synch. "
+      lcl.firm-n " vs. " count lcl.firm-set )
+  ]
+
+  ;; find and update the averages of the fixed costs, marginal costs and profits of the firms
+  ;; with positive current shipments.  If there are none, do the same for all firms.  If there 
+  ;; are no firms at all, enter zeros.
+  let producing lcl.firm-set with [frm.current-shipments > 0]
+  let firm-set ifelse-value (any? producing) [producing] [lcl.firm-set] 
+  ifelse  any? firm-set 
+  [
+    ;; record the average of the FC's and MC's of firms in the firm set.
+    set lcl.FCbar mean ([frm.FC] of firm-set)
+    set lcl.MCbar mean ([frm.MC] of firm-set)
+
+    ;; record the average and maximim profits of firms in the firm set.
+    ;; These are kept in a list going back Proftits-length periods.
+    set lcl.avgProfit mean ([frm.current-profit] of firm-set)
+    set lcl.maxProfit max ([frm.current-profit] of firm-set)
+  ]
+  [
+    set lcl.FCbar 0
+    set lcl.MCbar 0 
+    set lcl.avgProfit 0
+    set lcl.maxProfit 0 
+  ]
+ 
+end  ;; of locality-update
+
+;; ------------------------------------------------------------------------------------------------------
+;; ------------------------------------------------------------------------------------------------------
+
+
+;; ------------------------------------------------------------------------------------------------------
+
+;; Collects various trade data that is not needed for any purpose other than displaying output.
+;; Given that shipments happen in one period and those goods are not sold until the next, we need to 
+;; decide when they are counted as imports and exports.  Here, we define exports as the sum of 
+;; shipments out of the region in the period in which they were produced.  Imports of those same goods
+;; are recorded in the next period when they are available for sale in the market.
+;;
+;; INDUSTRY CONTEXT
+
+to update-trade-data
+  
+  ; gather bilateral trade data in the commercial links between localities and markets.
+  ask ind.commercial-links [
+    let my-agents shipagents with [shpa.commercial-link = myself]
+    set clnk.shipments sum [shpa.volume-shipped] of my-agents
+    set clnk.value-fob sum [shpa.volume-shipped * shpa.FOB] of my-agents
+    set clnk.value-cif sum [shpa.volume-shipped * shpa.CIF] of my-agents
+  ]
+  
+  ; record export shipments and value for each locality.
+  ask ind.localities [
+    set lcl.shipments sum [clnk.shipments] of my-out-commercial-links
+    set lcl.export-shipments sum [clnk.shipments] of (my-out-commercial-links with [clnk.is-export-link?])
+    set lcl.exports-fob sum [clnk.value-fob] of (my-out-commercial-links with [clnk.is-export-link?])
+    set lcl.local-shipments (lcl.shipments - lcl.export-shipments)
+  ]
+  
+
+; record import shipmens and value for each market.
+  ask ind.markets [
+    set mkt.shipments sum [clnk.shipments] of my-in-commercial-links
+    set mkt.import-shipments sum [clnk.shipments] of (my-in-commercial-links with [clnk.is-export-link?])
+    set mkt.imports-cif sum [clnk.value-cif] of (my-in-commercial-links with [clnk.is-export-link?])
+    set mkt.local-shipments (mkt.shipments - mkt.import-shipments)
+  ]
+
+end  ;; of collect-trade-data
+  
+;; ------------------------------------------------------------------------------------------------------
+
+;; returns a number >= 1 that reflects the external economies resulting from the number of firms in the 
+;; region.  Two responses are possible and the one chosen depends on whether lcl.external-econ-alpha 
+;; is set in a valid range for the quasiexponential response reporter.
+;; Note that this check could take place in a combined response reporter.  Someday ...
+;;
+;; When there are no firms, n = 0, we return the same value as if there were one firm as there are 
+;; no external economies in either case.
+;;
+;; LOCALITY CONTEXT, CALLED BY LOCALITY
+
+to-report external-economies [ n ]
+  
+  let nn larger-of n 1
+  
+  ifelse lcl.external-econ-alpha <= 0   ;; alpha <= 0 is a signal to use the simple exponential response.
+  [
+    report exponential-response nn lcl.external-econ-ub lcl.external-econ-nstar
+  ]
+  [
+    report quasiexponential-response nn lcl.external-econ-alpha lcl.external-econ-ub lcl.external-econ-nstar
+  ]
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+
+to locality-history-start
+  
+  ;; DATASTORE CONTEXT
+  
+  set lcl.history stats:newtable
+  stats:set-names lcl.history ["avgProfit" "maxProfit" "shipments"]
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+to locality-history-update
+  
+  ;; DATASTORE CONTEXT
+  
+  stats:add lcl.history (list lcl.avgProfit lcl.maxProfit lcl.shipments)
+  stats:use-most-recent lcl.history lcl.avgProfit-lookback
+  set lcl.avgProfit-forecast stats:forecast-linear-growth-at lcl.history "avgProfit" 1
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+to market-history-start
+  
+  ;; MARKET CONTEXT
+  
+  set mkt.history stats:newtable
+  stats:set-names mkt.history ["Pbar"]
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+to market-history-update
+  
+  ;; MARKET CONTEXT
+  
+  stats:add mkt.history (list mkt.Pbar)
+
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+to shipment-history-start
+  
+  ;; SHIPMENT AGENT CONTEXT
+  
+  set shpa.history stats:newtable
+  stats:set-names shpa.history ["shipped" "for-sale" "sold" "mktprice"]
+  
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+to shipment-history-update
+  
+  ;; SHIPMENT AGENT CONTEXT
+
+  stats:add shpa.history (list shpa.volume-shipped shpa.volume-for-sale shpa.volume-sold shpa.mktprice)
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+;; ------------------------------------------------------------------------------------------------------
+
+to industry-prune
+; Prune firms by region, or by the whole industry.
+
+    if (gbl.current-period > 1 and gbl.allow-new-firms?) [
+      ifelse ind.prune-by-region? [
+        ;; When pruning by region we use flags to insure that not too many firms close down
+        ;; in any given region.  Set all the flags and then ask regions to prune.
+;        ask ind.markets [ set mkt.supplier-pruned? false ]
+;        ask localities [ set lcl.producer-pruned? false ]
+;        ask ind.localities [prune-by-region]
+      ]
+      [
+        prune-by-industry
+      ]
+    ]
+    
+end
+;; ------------------------------------------------------------------------------------------------------
+;; ------------------------------------------------------------------------------------------------------
+;; ------------------------------------------------------------------------------------------------------
+;; ------------------------------------------------------------------------------------------------------
+;; ------------------------------------------------------------------------------------------------------
+;; ------------------------------------------------------------------------------------------------------
+
+
+
+;; Prunes a selection of firms in the industry that have negative profits.
+;; When pruning by industry, we may allow more than one firm at a time to close, 
+;; but limit the number to a given proportion of the total number of firms in the industry and, of 
+;; those, allow only a certain number in any given region.
+;;
+;; INDUSTRY CONTEXT
+
+to prune-by-industry
+  
+  let n larger-of (ind.max-industry-closers * count ind.firm-set) 1
+  let losers firm-n-biggest-losers n ind.firm-set ind.biggest-loser-reporter
+  if any? losers [
+    ask ind.localities [
+      let rgnlosers losers with [frm.locality = myself]
+      ask rgnlosers [
+        firm-announce-out
+        firm-close-down
+      ]
+;      let m count rgnlosers
+;      if m > 0 [
+;        set m larger-of (([ind.max-regional-closers] of myself) * m) 1
+;        ask n-biggest-losers m rgnlosers ([ind.biggest-loser-reporter] of myself) [
+;          firm-close-down
+;          firm-announce-out
+;          ]
+;      ]
+    ]
+  ]
+  
+end  ;; of prune-by-industry
+;; ------------------------------------------------------------------------------------------------------
+
+;; I'M NOT REALLY HAPPY WITH THIS PRUNING ALGORITHM.  FOR THE MOMENT, LET'S STICK TO PRUNING AT THE 
+;; INDUSTRY LEVEL.
+
+;; Prunes producers in this region.
+;; First, check if any producers at this region or suppliers to this region's market 
+;; have already been pruned.  (We only allow one at a time.)  If so exit.
+;; (Since only regions prune firms and they prune only firms in their own region, this first check 
+;; should be unnecessary.)
+;;
+;; Otherwise
+;; 1) find all producers in this region that meet the loss criteria.
+;; 2) ask the one with the greatest loss to close down.
+;;
+;;
+;; DATASTORE CONTEXT
+
+;to prune-by-region
+;  
+;  if ( not lcl.producer-pruned? ) and 
+;       not ( (lcl.market-in-region != nobody ) and ([mkt.supplier-pruned?] of lcl.market-in-region) ) [
+;    ask n-biggest-losers 1 lcl.firm-set lcl.biggest-loser-reporter [ firm-close-down false]
+;  ]
+;  
+;end  ;; of prune-by-region
+
+;; ------------------------------------------------------------------------------------------------------
+
+to-report my-in-shipment-agents
+  
+  ;; Reports the agentset of shipment agents for all the market's in-shipments.
+  
+  ;; MKT CONTEXT
+  
+  report turtle-set [shpl.shipment-agent] of my-in-shipments
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+

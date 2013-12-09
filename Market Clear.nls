@@ -1,0 +1,209 @@
+to clear-the-market-q
+
+  ; Clears the calling market using the shp.volume-for-sale of all the in-shipments to the market by 
+  ; finding the set of prices at which the volumes can be sold.  Those prices are entered in the 
+  ; corresponding shp.mktprice.
+  ;
+  ; Note that there is no need to call update-market after this procedure since update-market would 
+  ; just recalculate all the market aggregates from the values this procedure has set in the shipment
+  ; links.  One may, however, want to call update-market-history.
+  ;
+  ; MARKET CONTEXT
+
+  ; We need to match the quantity that each firm has for sale with the price at which that quantity 
+  ; can be sold.  Therefore we make a list of in-shipment agent id's so we can match each quantity with the 
+  ; resulting price.  The in-shipment agent list need be in no particular order, just so the order is fixed 
+  ; at the begining of the procedure. 
+  let shipment-agent-list [self] of my-in-shipment-agents
+  let qlist map [[shpa.volume-for-sale] of ?] shipment-agent-list
+  
+  ; check for a stray q < 0, although there should not be any, and also for any very small values that
+  ; should be set to zero so as not to result in over/underflows when taken to a power in
+  ; clr-the-market.  (clr-the-market performs this test too, but we need a "clean" qlist here.
+  ; Otherwise the plist returned by clr-the-market may not be consistent with qlist.
+  ; (The 0.01 is completely arbitrary.)
+  set qlist map [ifelse-value (? < 0.01) [0] [?]] qlist
+  
+  let alist get-alphas qlist
+  
+  let plist clr-the-market qlist alist
+
+  ;; for firms with zero sales, q = 0, the price will have been set to gbl.NA by clr-the-market.
+  ;; calculate mkt.total-sales, determine the number active suppliers, that is the number of of 
+  ;; firms with q > 0, and find the average price of the active suppliers, that is firms with 
+  ;; price != gbl.NA. If there are no active suppliers, the average price is set to zero
+  set mkt.suppliers length remove 0 qlist
+  
+  ; we need to eliminate the goods whose q = 0 from both plist and alist before computing 
+  ; Pbar and Psigma. Such goods will have had their p and alpha set to gbl.NA
+  let p remove gbl.NA plist
+  let a remove gbl.NA alist
+
+  ifelse (mkt.suppliers > 0) [
+    set mkt.Pbar mean p
+    let one-sigma (1 - mkt.sigma)
+    set mkt.Psig sum (map [?1 * (?2 ^ one-sigma)] a p)
+    set mkt.Phat (sum (map [?1 * ?2] qlist plist)) / sum qlist
+  ]
+  [
+    set mkt.Pbar gbl.NA
+    set mkt.Psig gbl.NA
+    set mkt.Phat gbl.NA 
+  ]
+    
+  ;; Now go back and set all the market prices in the respective shipagents.
+  ;; Also set shp.volume-sold to shp.volume-for-sale since we assume the market fully clears, and update
+  ;; shp.cost-of-goods-sold.  Also set the shp.cif, fob and net prices from the shp.mktprice.
+  (foreach shipment-agent-list plist qlist [ 
+    ask ?1 [
+      set shpa.mktprice ?2 
+      ; NOTE, we need to set the discounted price BEFORE resetting shp.volume-sold since the 
+      ; discounting is base on the old value of shp.volume sold.
+      set shpa.mktprice-discounted mktprice-discounted ?2 ?3 shpa.volume-sold
+      set shpa.volume-sold ?3
+      set shpa.cost-of-goods-sold shpa.cost-of-goods-for-sale
+      update-shipment-prices
+    ] 
+  ])
+
+
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+;; ------------------------------------------------------------------------------------------------------
+
+to-report clr-the-market [ qlist alist ]
+  
+  ; Sets the market prices at which each firm can sell the quantity given in qlist the market
+  ; given by mkt.  (If the quantity is zero, the corresponding price is set to gbl.NA.)
+  ; We use here a CES utility function for the demand for the varieties of this good.
+  
+  ; MARKET CONTEXT
+  
+  ; check for a stray q < 0, although there should not be any, and also for any very small values that
+  ; should be set to zero so as not to result in over/underflows when taken to a power.
+  ; (The 0.01 is completely arbitrary.)
+  set qlist map [ifelse-value (? < 0.01) [0] [?]] qlist
+  
+  if (sum qlist <= 0) [
+    ; There are no intended sales in this market, set all the market prices to gbl.NA.
+    report n-values length qlist [gbl.NA]
+  ]
+  
+  ; Market size, that is the amount spent on the good in this market, is sensitive to the weighted
+  ; average price of the good, where the weights are the amount of sales. Doing the algebra we get
+  ; total expenditure in this market of M.
+  let M mkt.size * ( (mkt.size / sum qlist) ^ (mkt.elasticity / (1 - mkt.elasticity)) )
+  
+  ; find the price of each good. Note that in getting the y list, we check for goods
+  ; for which q = 0, setting the corresponding element of y = 0.
+  let x (1 / mkt.sigma)
+  let y (map [ifelse-value (?2 = 0) [0] [(?1 / ?2) ^ x]] alist qlist)
+  let z M / sum (map [?1 * ?2] qlist y)
+  let plist map [z * ?] y
+    
+  ; if (and only if) a good's q is zero, its p should be zero as well.  Set those prices to gbl.NA.
+  set plist map [ifelse-value (? = 0) [gbl.NA] [?]] plist
+  
+  if not approx-equal sum (map [?1 * ?2] qlist plist) M 0 [
+    print-message gbl.cmd (word "market " [who] of self " does not clear " (list sum (map [?1 * ?2] qlist plist) M))
+  ]
+  
+  report plist
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+to-report marginal-revenue [ Q ]
+  
+  ; reports the firm's marginal revenue in a given market.  The firm and market are those at either end
+  ; end of this shipment link.
+  ;
+  ; SHIPMENT AGENT CONTEXT
+  
+  let delta 0.125
+  
+  let Q1 larger-of 0 (Q - delta)
+  let Q2 Q + delta
+  
+  let P1 netprice-from-mktprice-discounted (provisional-mktprice-discounted-by-clearing Q1)
+  let P2 netprice-from-mktprice-discounted (provisional-mktprice-discounted-by-clearing Q2)
+  
+  report (Q2 * P2 - Q1 * P1) / (Q2 - Q1)
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+to-report my-price-elasticity
+  ; reports the own price elasticity of demand facing this shipment agent. Ignores the impact of this
+  ; firm's quantity/price on total market sales.
+  
+  ;SHIPMENT AGENT CONTEXT
+  
+  ; for the moment, if there are no suppliers to this market, report gbl.NA
+  if ([mkt.suppliers] of shpa.market = 0) [report gbl.NA]
+  
+  ; for now, if the market price is gbl.NA, report gbl.NA
+  if (shpa.mktprice = gbl.NA) [report gbl.NA]
+
+  ; get the sigma for this market and the alpha for this shipment agent.
+  let sigma [mkt.sigma] of shpa.market
+  let one-sigma (1 - sigma)
+  let alpha get-my-alpha
+  
+  report (- sigma) - alpha * one-sigma * (shpa.mktprice ^ one-sigma) / [mkt.Psig] of shpa.market
+    
+end
+
+;; ------------------------------------------------------------------------------------------------------
+;; ------------------------------------------------------------------------------------------------------
+
+to-report get-alphas [ qlist ]
+  ; returns a list of alphas for the given qlist. if q = 0, the corresponding alpha is set to gbl.NA. 
+  
+  ; MARKET CONTEXT
+  
+  ; We assume for now that all the alphas in the U function are equal. This could change in the future.
+  ; but, if it does, we'll need to associate q's with individual firms. qlist may then need to be a list
+  ; of shipment agents and quantities.
+  let alist n-values length qlist [1.0]
+  
+  ; Normalize the alphas, first "dropping" from the sum those goods for which q = 0 by setting those 
+  ; alphas to zero.
+  set alist (map [ifelse-value (?1 = 0) [0] [?2]] qlist alist)
+  let s sum alist
+  
+  if s = 0 [report n-values length qlist [gbl.NA]]
+  
+  ; change the zeros to gbl.NA and return alist.
+  report map [ifelse-value (? = 0) [gbl.NA] [? / s]] alist  
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+to-report get-my-alpha
+  ; gets the market alpha of the calling shipment agent.
+  
+  ; SHIPMENT AGENT CONTEXT
+  
+  ; we assume that all the alphas are equal and so depend only on the number of suppliers.
+  report 1 / [mkt.suppliers] of shpa.market    
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+;; ------------------------------------------------------------------------------------------------------
+;; ------------------------------------------------------------------------------------------------------
+;; ------------------------------------------------------------------------------------------------------
+;; ------------------------------------------------------------------------------------------------------
+;; ------------------------------------------------------------------------------------------------------
+;; ------------------------------------------------------------------------------------------------------
+;; ------------------------------------------------------------------------------------------------------
+;; ------------------------------------------------------------------------------------------------------
+;; ------------------------------------------------------------------------------------------------------
+;; ------------------------------------------------------------------------------------------------------
+;; ------------------------------------------------------------------------------------------------------

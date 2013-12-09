@@ -1,0 +1,53 @@
+;; Scheduler procedures
+;; a schedule is a list of lists, with each item of the list consisting
+;; of an integer time value and a task to be executed at that time.
+
+
+to-report schedule-create
+  
+  let schedule []
+  report schedule
+  
+end
+
+
+to-report schedule-execute [ schedule current-time ]
+  ;; executes all the taks in the schedule with an execution time 
+  ;; less than or equal to "current-time".
+  ;; this procedure assumes that the schedule is sorted by time.
+  ;; tasks are deleted from the list once they have been executed.
+  ;; if the schedule is empty, nothing happens.
+  
+  while [not empty? schedule and first first schedule <= current-time] [
+    run last first schedule
+    set schedule butfirst schedule
+  ]
+  
+  report schedule
+
+end
+  
+to-report schedule-sort [ schedule ]
+  ;; sorts the schedule by time values. 
+  ;; note that empty lists are not a problem for sort-by.
+  
+  report sort-by [first ?1 < first ?2] schedule
+    
+end
+
+to-report schedule-add [ schedule at-time new-task]
+  ;; adds a task to the schedule and re-sorts the schedule if the added task
+  ;; is to be executed at a time before the last task in the current schedule
+  ;; (which of course is assumed to be already sorted).
+  
+  if not is-number? at-time or not is-command-task? new-task [
+    ;; this is not a legal item to add to the schedule
+    ;; throw an error
+    throw-error (word "Ill-formed new task in schedule-add: " new-task)
+  ]
+  
+  let n ifelse-value (empty? schedule) [ -1 ] [ first last schedule ]
+  report ifelse-value (n > at-time) [ schedule-sort lput (list at-time new-task) schedule ] 
+    [ lput (list at-time new-task) schedule ]
+  
+end

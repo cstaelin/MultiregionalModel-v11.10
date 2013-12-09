@@ -1,0 +1,519 @@
+to print-message [ dest message ]
+  
+  ; prints a message to the appropriate place: the output window, the commandcenter, or the message file.
+  ; if we are in behaviorspace, prepend the run number to the message.
+  
+  let mssg message
+  if (message != "") [set mssg (word run-number message)]
+  
+  ifelse not gbl.messages-to-file? [
+    if (dest = gbl.cmd) [
+      print mssg
+    ]
+    if (dest = gbl.opt) [
+      output-print mssg
+    ]
+  ]
+  [
+    open-carefully (word gbl.results-path gbl.message-filename)
+    file-print mssg
+    file-close
+  ]
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+to-report run-number
+  
+  ; reports a string with the BehaviorSpace run number, if any.
+  
+  report ifelse-value (behaviorspace-run-number = 0) [""] [(word "Run number " pad-left behaviorspace-run-number "0" 3 " ")]
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+to set-global-file-paths
+  
+ ; sets the paths to the data and output files, both relative to the directory in which the model
+ ; itself it located. If this is a headless run of BehaviorSpace, then an experiment name has been
+ ; put in the environment variable NETLOGO_EXPERIMENT and the data and results should be under
+ ; a subdirectory with that name.  If NETLOGO_EXPERIMENT has not been set, then the data and 
+ ; results will just go under the model directory.
+  
+  let sep pathdir:get-separator
+  let model-dir pathdir:get-model
+  let experiment shell:getenv "NETLOGO_EXPERIMENT"
+  
+  ; construct or get the various paths to the experiment, data and output files
+  ifelse (experiment = "") [
+    set gbl.experiment-path ""
+    set gbl.data-path (word model-dir sep "data")
+    set gbl.results-path (word model-dir sep "results")
+  ]
+  [
+    set gbl.experiment-path shell:getenv "NETLOGO_EXPERIMENT_DIR"  
+    set gbl.data-path shell:getenv "NETLOGO_DATA_DIR"
+    set gbl.results-path shell:getenv "NETLOGO_RESULTS_DIR"
+  ]
+;  show gbl.data-path
+;  show pathdir:isDirectory? gbl.data-path
+  
+  ; create the data and results directories if they do not already exist.
+  ; (we actually do not have to check since pathdir:create should do nothing if the directory
+  ; already exists.)
+  if (not pathdir:isDirectory? gbl.data-path) [pathdir:create gbl.data-path]
+  if (not pathdir:isDirectory? gbl.results-path) [pathdir:create gbl.results-path]
+  
+  ; and finally append another separator so that we can quickly append filenames to the paths.
+  set gbl.data-path (word gbl.data-path sep)
+  set gbl.results-path (word gbl.results-path sep)
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+to-report set-results-table-name
+  
+  ; reports a name for the results table using the NETLOGO_EXPERIMENT environment variable if it 
+  ; has been set.
+  
+  let experiment shell:getenv "NETLOGO_EXPERIMENT"
+  report ifelse-value (experiment = "") ["MRModel-results.csv"] [(word experiment "-results.csv")]
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+;; ------------------------------------------------------------------------------------------------------
+
+to-report set-message-file-name
+  
+  ; reports a name for the message file using the NETLOGO_EXPERIMENT environment variable if it 
+  ; has been set.
+  
+  let experiment shell:getenv "NETLOGO_EXPERIMENT"
+  report ifelse-value (experiment = "") ["MRModel-messages.txt"] [(word experiment "-messages.txt")]
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+
+to open-carefully [ filename ]
+  
+  ; opens a file "carefully", assuming that if there is an error, it is because the file is in use
+  ; by another concurrent BehaviorSpace run.  Thus it waits half a second and tries again.
+  
+  carefully [file-open filename]
+  [
+    print error-message
+    wait 0.5
+    open-carefully filename
+  ]
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+;; ------------------------------------------------------------------------------------------------------
+
+to write-header-to-file
+  
+  ; writes the header to the results file.  The header must, of course, be coordinated with the data
+  ; written in the write-output-to-file procedure, below.
+  
+  open-carefully (word gbl.results-path gbl.output-filename)
+
+  file-type (word "File opened for results: " date-and-time)
+  EOL
+  
+  if gbl.headless? [
+    file-type (word "Running experiment " (shell:getenv "NETLOGO_EXPERIMENT_NAME") " in model " (shell:getenv "NETLOGO_MODEL"))
+    EOL
+  ]
+  
+  file-type "Run,Tick,Period,Seed"
+  foreach sort wld.industries [
+    let indsuffix (word " " [ind.name] of ?)
+    let mktlist sort [ind.markets] of ?
+    let lcllist sort [ind.localities] of ?
+    let clinks  sort [ind.commercial-links] of ?
+    
+    type-file (word "trnspcost" indsuffix)
+    type-file (word "follow-me" indsuffix)
+    
+    foreach lcllist [
+      let rgnsuffix (word " " ([lcl.name] of ?))
+      type-file (word "Nfrms"     rgnsuffix indsuffix)
+      type-file (word "SHP"       rgnsuffix indsuffix)
+      type-file (word "EXP"       rgnsuffix indsuffix)
+      type-file (word "wageL"     rgnsuffix indsuffix)
+      type-file (word "Profit"    rgnsuffix indsuffix)
+      type-file (word "Ext-econ"  rgnsuffix indsuffix)
+      type-file (word "StdDevA0"  rgnsuffix indsuffix)
+      type-file (word "AvgA"      rgnsuffix indsuffix)
+      type-file (word "StdDevA"   rgnsuffix indsuffix)
+    ]
+    
+    foreach mktlist [
+      let mktsuffix (word " " ([mkt.name] of ?))      
+      type-file (word "Nsuppl" mktsuffix indsuffix)
+      type-file (word "SALES"  mktsuffix indsuffix)
+      type-file (word "IMP"      mktsuffix indsuffix)
+      type-file (word "Pbar"   mktsuffix indsuffix)
+    ]
+    
+    foreach clinks [
+      let name [clnk.name] of ?
+      type-file (word "subrate " name indsuffix)
+      type-file (word "unitsub " name indsuffix)
+      type-file (word "shpmnts " name indsuffix)
+      type-file (word "FOB " name indsuffix)
+      type-file (word "tarrate " name indsuffix)
+      type-file (word "unittar " name indsuffix)
+      type-file (word "CIF " name indsuffix)
+    ]
+  ]
+  
+  EOL
+  
+  file-close
+  
+end
+
+
+;; ------------------------------------------------------------------------------------------------------
+
+to write-output-to-file [ period ]
+  
+  ; writes the results of the current period to the results file. (If period = -1, setup has failed.
+  ; Just write the run number, ticks, period and the seed.)
+  
+  open-carefully (word gbl.results-path gbl.output-filename)
+  
+  let vol-precn 2
+  let prc-precn 3
+  
+  file-type behaviorspace-run-number
+  comma
+  file-type ticks
+  comma
+  file-type period
+  comma
+  file-type gbl.Seed
+  
+  ; if period = -1, this is a signal that setup failed.  Don't write any of the results
+  ; as they will be meaningless.
+  if (period >= 0) [
+    foreach sort wld.industries [
+      ask ? [
+        type-file ind.transport-cost
+        type-file ind.follow-me
+        
+        foreach sort ind.localities [
+          type-file [lcl.firm-n] of ?
+          type-file myprecision ([lcl.shipments] of ?) vol-precn
+          type-file myprecision ([lcl.export-shipments] of ?) vol-precn
+          type-file myprecision ([rgn.wageL] of ([lcl.region-agent] of ?)) prc-precn
+          type-file myprecision ([lcl.avgProfit] of ?) vol-precn
+          type-file myprecision ([lcl.external-econ-factor] of ?) prc-precn
+          type-file [lcl.pf-A-stddev] of ?
+          type-file ifelse-value (any? [lcl.firm-set] of ?) [mean [frm.A] of ([lcl.firm-set] of ?)] [0]
+          type-file ifelse-value (count [lcl.firm-set] of ? > 1) [standard-deviation [frm.A] of ([lcl.firm-set] of ?)] [0]
+        ]
+        
+        foreach sort ind.markets [
+          type-file [mkt.suppliers] of ?
+          type-file myprecision ([mkt.shipments] of ?) vol-precn
+          type-file myprecision ([mkt.import-shipments] of ?) vol-precn
+          type-file myprecision ([mkt.Pbar] of ?) prc-precn
+        ]
+        
+        foreach sort ind.commercial-links [
+          type-file [clnk.subsidy-rate] of ?
+          type-file [clnk.unit-subsidy] of ?
+          type-file [clnk.shipments] of ?
+          type-file [clnk.value-fob] of ?
+          type-file [clnk.tariff-rate] of ?
+          type-file [clnk.unit-tariff] of ?
+          type-file [clnk.value-cif] of ?
+        ]
+      ]
+    ]
+  ]
+  
+  EOL
+  
+  file-close
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+to comma
+  
+  file-type ","
+
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+to EOL
+  
+  file-type "\n"
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+to type-file [ input ]
+  
+  ; types the argument to the open file, preceded by a comma.  If the argument is a list, it types 
+  ; the individual items in the list, each preceded by a comma.
+
+  ifelse is-list? input [
+    foreach input [
+      type-file ?
+    ]
+  ]
+  [
+    comma
+    file-type input
+  ]
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+;; ------------------------------------------------------------------------------------------------------
+
+to-report read-data-from-file [ fname skip-first-line?]
+  ; Reads data from a CSV file and returns a list of lists which each sublist being the data from one
+  ; line of the file. The data may include numbers, quoted text or NetLogo lists of numbers and/or quoted
+  ; text.
+  ; Deals with the weird multiple quotation marks Excel assigns to quoted text and to lists that include 
+  ; quoted elements.
+  ; if skip-first-line? is true, the first line of the file is ignored (perhaps because it is a header).
+  ; Reports an empty list if the file does not exist.
+  ; Uses the string extension for text replacements.
+  
+  let data-list []
+  
+  if not file-exists? fname [
+    throw-error (word "Can not file file " fname ".")
+    report data-list
+  ]
+  
+  file-open fname
+  if skip-first-line? [let toss file-read-line]
+  while [not file-at-end?] [
+    let str file-read-line
+;    show str
+    while [member? "\"\"" str] [
+      set str string:rex-replace-all "\"\"" str "\""
+    ]
+;    show str
+    while [member? "\"[" str] [
+      set str string:rex-replace-all "\"\\[" str "["
+    ]
+;    show str
+    while [member? "]\"" str] [
+      set str string:rex-replace-all "\\]\"" str "]"
+    ]
+    set str (word "[" string:rex-replace-all "," str " " "]")
+;    show str
+    
+    set data-list lput read-from-string str data-list
+  ]
+  
+  file-close
+  report data-list
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+;; ------------------------------------------------------------------------------------------------------
+
+;to-report add-var [ var strng ]
+;
+;  ifelse is-list? var [
+;    foreach var [
+;      set strng add-var ? strng
+;    ]
+;  ]
+;  [
+;    ifelse (empty? strng) [report (word var)] [report (word strng  "," var)]
+;  ]
+;    
+;  report strng
+;  
+;end
+
+;; ------------------------------------------------------------------------------------------------------
+
+;to-report results-header
+;  
+;;; header line
+;
+;  let sep " "
+;  
+;  file-type "Period,Seed,Trnsp cost,Follow me"
+;  foreach sort wld.industries [
+;    let lcllist sort [ind.localities] of ?
+;    let mktlist sort [ind.markets] of ?
+;    let indsuffix (word sep [ind.name] of ?)
+;    
+;    foreach lcllist [
+;      let rgnsuffix (word sep ([lcl.name] of ?))
+;      
+;      foreach mktlist [
+;        let mktsuffix (word sep "to" sep ([mkt.name] of ?))
+;        type-file (word "subrate" rgnsuffix mktsuffix indsuffix)
+;      ]
+;      foreach mktlist [
+;        let mktsuffix (word sep "to" sep ([mkt.name] of ?))
+;        type-file (word "unitsub" rgnsuffix mktsuffix indsuffix)
+;      ]
+;      type-file (word "Nfrms"  rgnsuffix indsuffix)
+;      type-file (word "SHP"    rgnsuffix indsuffix)
+;      type-file (word "X"      rgnsuffix indsuffix)
+;      type-file(word "Profit"  rgnsuffix indsuffix)
+;    ]
+;    
+;    foreach mktlist [
+;      let mktsuffix (word sep ([mkt.name] of ?))
+;      
+;      foreach lcllist [
+;        let rgnsuffix (word sep "from" sep ([lcl.name] of ?))
+;        type-file (word "tarrate" mktsuffix rgnsuffix indsuffix)
+;      ]
+;      foreach lcllist [
+;        let rgnsuffix (word sep "from" sep ([lcl.name] of ?))
+;        type-file (word "unittar" mktsuffix rgnsuffix indsuffix)
+;      ]
+;      type-file (word "Nsuppl" mktsuffix indsuffix)
+;      type-file (word "SALES"  mktsuffix indsuffix)
+;      type-file (word "M"      mktsuffix indsuffix)
+;      type-file (word "Pbar"   mktsuffix indsuffix)
+;      type-file (word "Phat"   mktsuffix indsuffix)
+;    ]
+;  ]
+;  
+;  EOL
+;  
+;end
+
+;; ------------------------------------------------------------------------------------------------------
+
+;to-report results
+;  
+;; in all of this remember that the "setup" or "go" procedures have done a tick before results is called.
+;
+;; OBSERVER CONTEXT
+;
+;  let out-string ""
+;  ask gbl.world-agent [
+;    ; The first run in behaviorspace is a special one as it needs to report the header string for all 
+;    ; the subsequent data at the end of its setup, plus the setup results.
+;    ifelse (behaviorspace-run-number <= 1 and ticks = 1) [
+;      set out-string (word write-header-to-string "\n" write-output-to-string)
+;    ]
+;    [
+;      set out-string write-output-to-string
+;    ]
+;  ]
+;  
+;  report out-string
+;  
+;end
+
+;; ------------------------------------------------------------------------------------------------------
+
+;to-report write-header-to-string
+;  
+;;; header line
+;
+;  let out-string ""
+;   
+;  set out-string add-var "Period" out-string
+;  
+;  foreach sort wld.industries [
+;    let indsuffix (word " " [ind.name] of ?)
+;    let mktlist sort [ind.markets] of ?
+;    let lcllist sort [ind.localities] of ?
+;    let clinks [ind.commercial-links] of ?
+;    
+;    foreach lcllist [
+;      let rgnsuffix (word " " ([lcl.name] of ?))
+;      let clist sort-on [end2] clinks with [end1 = ?]
+;
+;      set out-string add-var map [(word "subrate" rgnsuffix (word " to " ([mkt.name] of [end2] of ?)) indsuffix)] clist out-string
+;      set out-string add-var map [(word "unitsub" rgnsuffix (word " to " ([mkt.name] of [end2] of ?)) indsuffix)] clist out-string
+;      set out-string add-var (word "Nfrms"  rgnsuffix indsuffix) out-string
+;      set out-string add-var (word "SHP"    rgnsuffix indsuffix) out-string
+;      set out-string add-var (word "X"      rgnsuffix indsuffix) out-string
+;      set out-string add-var(word "Profit"  rgnsuffix indsuffix) out-string
+;    ]
+;    
+;    foreach mktlist [
+;      let mktsuffix (word " " ([mkt.name] of ?))
+;      let clist sort-on [end1] clinks with [end2 = ?]
+;      
+;      set out-string add-var map [(word "tarrate" mktsuffix (word " from " ([lcl.name] of [end1] of ?)) indsuffix)] clist out-string
+;      set out-string add-var map [(word "unittar" mktsuffix (word " from " ([lcl.name] of [end1] of ?)) indsuffix)] clist out-string
+;      set out-string add-var (word "Nsuppl" mktsuffix indsuffix) out-string
+;      set out-string add-var (word "SALES"  mktsuffix indsuffix) out-string
+;      set out-string add-var (word "M"      mktsuffix indsuffix) out-string
+;      set out-string add-var (word "Pbar"   mktsuffix indsuffix) out-string
+;      set out-string add-var (word "Phat"   mktsuffix indsuffix) out-string
+;    ]
+;  ]
+;  
+;  report out-string
+;
+;end
+
+;; ------------------------------------------------------------------------------------------------------
+;; ------------------------------------------------------------------------------------------------------
+
+;to-report write-output-to-string  
+;  
+;  let vol-precn 2
+;  let prc-precn 3
+;  let out-string ""
+;  
+;  set out-string add-var gbl.current-period out-string
+;  
+;  foreach sort wld.industries [
+;    let lcllist sort [ind.localities] of ?
+;    let mktlist sort [ind.markets] of ?
+;    let clinks [ind.commercial-links] of ?
+;    
+;    foreach lcllist [
+;      let clist sort-on [end2] clinks with [end1 = ?]
+;      set out-string add-var map [[clnk.subsidy-rate] of ?] clist out-string
+;      set out-string add-var map [[clnk.unit-subsidy] of ?] clist out-string
+;      set out-string add-var [lcl.firm-n] of ? out-string
+;      set out-string add-var myprecision ([lcl.shipments] of ?) vol-precn out-string
+;      set out-string add-var myprecision ([lcl.exports] of ?) vol-precn out-string
+;      set out-string add-var myprecision ([lcl.avgProfit] of ?) vol-precn out-string
+;    ]
+;    
+;    foreach mktlist [
+;      let clist sort-on [end1] clinks with [end2 = ?]
+;      set out-string add-var map [[clnk.tariff-rate] of ?] clist out-string
+;      set out-string add-var map [[clnk.unit-tariff] of ?] clist out-string
+;      set out-string add-var [mkt.suppliers] of ? out-string
+;      set out-string add-var myprecision ([mkt.total-sales] of ?) vol-precn out-string
+;      set out-string add-var myprecision ([mkt.imports] of ?) vol-precn out-string
+;      set out-string add-var myprecision ([mkt.Pbar] of ?) prc-precn out-string
+;      set out-string add-var myprecision ([mkt.Phat] of ?) prc-precn out-string
+;    ]
+;  ]
+;  
+;  report out-string
+;  
+;end
+
+;; ------------------------------------------------------------------------------------------------------

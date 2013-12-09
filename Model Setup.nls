@@ -1,0 +1,936 @@
+;; This file contains all the setup procedures.
+;;
+
+;; ------------------------------------------------------------------------------------------------------
+;;                               SETUP PRODEDURES
+;; ------------------------------------------------------------------------------------------------------
+
+to behaviorspace-setup
+  
+  ; this sets up a new world, or imports an old one.  Note that "results" is evaluated at the end of 
+  ; the setup phase, so we handle the first run differently so that we can have the results header at
+  ; the top of the results file.
+  ; Note that both new-world-button and world-import tick at the end, so we leave this procedure with 
+  ; ticks = 1.
+  
+  ifelse gbl.new-world? [ button-world-new ] [ button-world-import ]
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+to button-world-new
+  
+  let t0  bsp.pf-A-stddev
+  let t1  bsp.transport-cost
+  let t2  bsp.follow-me
+  let t3  bsp.wage-factor
+  let t4  bsp.external-econ-ub
+  
+  ;; clear all the patches, turtles and links; clear the plots, output window & display.
+  clear-all
+  random-seed gbl.seed     ;; begin with a given seed for replicability.
+  display                  ;; clear the display.
+  reset-ticks
+  
+  set bsp.pf-A-stddev        t0
+  set bsp.transport-cost     t1
+  set bsp.follow-me          t2
+  set bsp.wage-factor        t3
+  set bsp.external-econ-ub   t4
+  
+  globals-setup
+  
+  if gbl.profile? [profile-setup gbl.profile-start]
+  
+  print-message gbl.opt (word "Beginning setup at " date-and-time ".")
+  
+  set-profitmax-methods-table
+  
+  world-create
+  
+  ; Only now do we set up the plots as the temporary plot pens need all the agents to be available.
+  ask industries [ plots-setup ]
+  
+  ; if called for, write the header to the output file.
+  with-local-randomness [
+    if gbl.write-to-file? or gbl.write-setup-to-file? [
+      ask gbl.world-agent [
+        if behaviorspace-run-number <= 1 [ write-header-to-file ]
+      ]
+    ]
+  ]
+  
+  ; now run the model for a number of iterations to see if it comes to a stable equilibrium.
+  ; set up pattern match strings.
+  ask [wld.industries] of gbl.world-agent [ 
+    set ind.pattern-list pattern-set-list ind.pattern-list
+  ]
+  
+  let seek-pattern? true
+  set gbl.setup-stable? run-for gbl.run-for-equilibrium seek-pattern?
+  
+  if NOT gbl.setup-stable? [
+    let max% 0
+    ask [wld.industries] of gbl.world-agent [ set max% larger-of max% pattern-find-% ]
+    ifelse max% > gbl.pattern-max-%-allowed [
+      ask [wld.industries] of gbl.world-agent [ pattern-report ]
+      print-message gbl.opt (word "Setup failed to find a starting equilibrium at " date-and-time ".")
+      if gbl.save-setup? [print-message gbl.opt "The results will not be saved."]
+      if (gbl.write-to-file?) [ 
+        ; period = -1 is a signal that setup failed, but at least this run will be represented in
+        ; the output file.
+        ask gbl.world-agent [ write-output-to-file -1 ] 
+      ]
+      stop
+    ]
+    [
+      print-message gbl.opt (word "Setup accepted a pattern with tolerance of " max%)
+      set gbl.setup-stable? true
+    ]
+  ]
+  
+  ; save the tick at which equilibrium was achieved.
+  let equilibrium-at ticks
+  
+  ; reinitialize all the histories with the (hopefully) equilibrium data.
+  ask [wld.industries] of gbl.world-agent [
+    ask ind.localities [ 
+      repeat gbl.history-length [locality-history-update]
+      stats:trim-data lcl.history gbl.history-length
+    ]
+    ask ind.markets [ 
+      repeat gbl.history-length [market-history-update] 
+      stats:trim-data mkt.history gbl.history-length
+    ]
+    ask ind.firm-set [
+      repeat gbl.history-length [ firm-history-update ]
+      stats:trim-data frm.history gbl.history-length
+      ask frm.shipment-agents [ 
+        repeat gbl.history-length[ shipment-history-update ]
+        stats:trim-data shpa.history gbl.history-length
+      ] 
+    ]
+  ]
+  
+  ask [wld.industries] of gbl.world-agent [ set ind.pattern-list [] ]
+  set gbl.in-setup2? false
+  
+  print-message gbl.opt (word "Found equilibrium at period " equilibrium-at ".")
+  print-message gbl.opt (word "Finished with Setup at " date-and-time ".")
+  
+  if ((not (gbl.headless? or gbl.behaviorspace?)) and gbl.look-at-setup? ) [
+    user-message "Press OK to cleanup after setup."  
+  ]
+  
+  ; reset gbl.current-period and reset-ticks. Also clear all the plots.
+  set gbl.current-period 0
+  reset-ticks
+  clear-all-plots
+  
+  ; if called for, write the setup results to the output file, display the results and save the setup.
+  ; (if gbl.write-setup-to-file is true, the full setup sequence has already been written to the
+  ; file, but we write the setup data again anyway.)
+  with-local-randomness [
+    if (gbl.write-to-file?) [ 
+      ask gbl.world-agent [ write-output-to-file 0 ] 
+    ]
+;    if gbl.go-report? [
+;      display-separator
+;      ask gbl.world-agent [
+;        foreach sort wld.industries [
+;          ask ? [display-results]
+;        ]
+;      ]
+;    ]
+  ]
+  
+  if gbl.save-setup? [
+    world-export-to-file (word gbl.data-path gbl.saved-world-filename)
+    print-message gbl.opt (word "Setup saved in " gbl.saved-world-filename ".") 
+  ]
+  
+  ; recreate the temporary plot pens, which were deleted by clearing the plots,
+  ; above. We wait to do it here because export/import world can't handle them and we don't
+  ; want them around if we are saving the setup.
+  ask [wld.industries] of gbl.world-agent [ plots-setup ]
+  
+  if gbl.profile? [profile-setup gbl.profile-end]
+  
+  tick
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+to button-world-import
+  
+  ;; OBSERVER CONTEXT
+
+  if gbl.saved-world-filename = 0 [set gbl.saved-world-filename "Saved_World.csv"]
+  set-global-file-paths
+  
+  world-import-from-file (word gbl.data-path gbl.saved-world-filename)
+  
+  ; since the plot setups were not saved, we need to recreate them.
+  ask industries [ plots-setup ]
+  
+  print-message gbl.opt (word "Loaded an existing world from " gbl.saved-world-filename ".")
+  
+  tick
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+to world-create
+  
+  ;; OBSERVER CONTEXT
+  
+  set gbl.in-setup1? true
+  set gbl.in-setup2? true
+  create-worlds 1 [ 
+    set shape "sailboat side"
+    set gbl.world-agent self
+    
+    set wld.profit-threshold 5
+    
+    world-setup  
+    
+    set gbl.in-setup1? false
+    
+    blank-line
+  ]
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+to globals-setup
+  
+  ;; OBSERVER CONTEXT
+  
+  ;; check to be sure some important booleans and strings have been initialized.
+  set gbl.headless? ifelse-value (gbl.headless? = 0) [false] [gbl.headless?]
+  set gbl.behaviorspace? ifelse-value (gbl.behaviorspace? = 0) [false] [gbl.behaviorspace?]
+  set gbl.setup-report? false
+  set gbl.go-report? false
+  
+  set gbl.output-filename set-results-table-name
+  set gbl.output-filename ifelse-value (gbl.output-filename = 0) [""] [gbl.output-filename]
+  
+  set gbl.message-filename set-message-file-name
+  set gbl.messages-to-file? ifelse-value (gbl.messages-to-file? = 0) [false] [gbl.messages-to-file?]  
+  
+  ; set some more filenames and set the data and results paths.
+  set gbl.saved-world-filename "Saved_World.csv"
+  set gbl.setup-profile "Setup_Profile.csv"
+  set gbl.run-profile   "Run_Profile.csv"
+  set-global-file-paths
+  
+  set gbl.max-periods 100        ;; set the default number of periods before a halt.
+  set gbl.history-length 20      ;; the number of periods for which historical data is kept.
+  set gbl.forecast-lookback 10   ;; default for the forecasting periods.
+  
+  set gbl.pattern-length-needed 5
+  set gbl.pattern-%-needed 2
+  set gbl.pattern-max-%-allowed 5
+  set gbl.run-for-equilibrium 200
+  
+  set gbl.BIG  10 ^ 6
+  set gbl.tiny 10 ^ -6
+  set gbl.NA -1000
+  
+  set gbl.profile-start 0
+  set gbl.profile-end 1
+  set gbl.cmd 0
+  set gbl.opt 1
+  
+  ; Begin with period 0
+  ; Initialize gbl.setup-stable as false as an error in the part of the setup procedure that sets
+  ; it may leave it unitialized, causing BehaviorSpace to choke.
+  set gbl.current-period 0
+  set gbl.setup-stable? false
+  
+end  ;; of globals-setup
+
+;; ------------------------------------------------------------------------------------------------------
+
+to world-export-to-file [ fname ]
+  
+  ;; OBSERVER CONTEXT
+  
+  ; Stats extension tables do not support X/M.  Convert them to lists before export and
+  ; recreate them on import.
+  let firm-histories [list self frm.history] of firms  
+  ask firms [
+    set frm.history-table-data stats:get-data-as-list frm.history
+    set frm.history-table-names stats:get-names frm.history
+    set frm.history stats:delete-table frm.history
+  ]
+  let locality-histories [list self lcl.history] of localities
+  ask localities [
+    set lcl.history-table-data stats:get-data-as-list lcl.history
+    set lcl.history-table-names stats:get-names lcl.history
+    set lcl.history stats:delete-table lcl.history
+  ]
+  let market-histories [list self mkt.history] of markets
+  ask markets [
+    set mkt.history-table-data stats:get-data-as-list mkt.history
+    set mkt.history-table-names stats:get-names mkt.history
+    set mkt.history stats:delete-table mkt.history
+  ]
+  let shipagent-histories [list self shpa.history] of shipagents
+  ask shipagents [
+    set shpa.history-table-data stats:get-data-as-list shpa.history
+    set shpa.history-table-names stats:get-names shpa.history
+    set shpa.history stats:delete-table shpa.history
+  ]
+  
+  ; These tables can not be re-imported even as lists since they contain tasks.
+  ; They need to be reconstructed from their input files after import-world. (This is a NetLogo bug.)
+  ask worlds [ set wld.policy-schedule 0 ]
+  table:clear gbl.method-table
+  
+  export-world fname
+  
+  ; Now, in case we are going to run the model in this session, we need to reload all those structures 
+  ; that could not be exported "as is".
+  set-profitmax-methods-table
+  ask worlds [ set wld.policy-schedule policy-load-changes ]
+  
+  ask firms [
+    set frm.history stats:newtable-from-row-list frm.history-table-data
+    stats:set-names frm.history frm.history-table-names    
+  ]
+  ask localities [
+    set lcl.history stats:newtable-from-row-list lcl.history-table-data
+    stats:set-names lcl.history lcl.history-table-names    
+  ]
+  ask markets [
+    set mkt.history stats:newtable-from-row-list mkt.history-table-data
+    stats:set-names mkt.history mkt.history-table-names    
+  ]
+  ask shipagents [
+    set shpa.history stats:newtable-from-row-list shpa.history-table-data
+    stats:set-names shpa.history shpa.history-table-names    
+  ]
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+to world-import-from-file [ world-file ]
+  
+  ;; OBSERVER CONTEXT
+  
+  ; save the current values of some switches and inputs for resetting below.
+;  let tmp0 gbl.setup-report?
+;  let tmp1 gbl.go-report?
+  let tmp2 gbl.halt-period
+  let tmp3 gbl.write-to-file?
+  let tmp4 gbl.save-setup?
+  let tmp5 gbl.profile?
+  let tmp6 gbl.allow-new-firms?
+;  let tmp7 gbl.follow-me
+  let tmp8 gbl.plot
+  let tmp9 gbl.messages-to-file?
+  let tmpA gbl.solution-method
+  let tmpB gbl.initial-cash-balance
+  let tmpC gbl.loss-criterion
+  
+
+  import-world world-file
+  
+  set-profitmax-methods-table
+  ask worlds [ set wld.policy-schedule policy-load-changes ]
+  
+  ask firms [
+    set frm.history stats:newtable-from-row-list frm.history-table-data
+    stats:set-names frm.history frm.history-table-names    
+  ]
+  ask localities [
+    set lcl.history stats:newtable-from-row-list lcl.history-table-data
+    stats:set-names lcl.history lcl.history-table-names    
+  ]
+  ask markets [
+    set mkt.history stats:newtable-from-row-list mkt.history-table-data
+    stats:set-names mkt.history mkt.history-table-names    
+  ]
+  ask shipagents [
+    set shpa.history stats:newtable-from-row-list shpa.history-table-data
+    stats:set-names shpa.history shpa.history-table-names    
+  ]
+  
+  ; reset these switches and inputs to their prior values.
+;  set gbl.setup-report?     tmp0
+;  set gbl.go-report?        tmp1
+  set gbl.halt-period       tmp2
+  set gbl.write-to-file?    tmp3
+  set gbl.save-setup?       tmp4
+  set gbl.profile?          tmp5
+  set gbl.allow-new-firms?  tmp6
+;  set gbl.follow-me         tmp7
+  set gbl.plot              tmp8
+  set gbl.messages-to-file? tmp9
+  set gbl.solution-method   tmpA
+  set gbl.initial-cash-balance tmpB
+  set gbl.loss-criterion    tmpC
+  
+  clear-output
+
+;  if gbl.go-report? [
+;    ask worlds [
+;      display-separator
+;      foreach sort wld.industries [ask ? [display-results]]
+;    ]
+;  ]
+  
+  with-local-randomness [
+    if gbl.write-to-file? [
+      ask worlds [
+        if behaviorspace-run-number <= 0 [write-header-to-file]
+        write-output-to-file 0
+      ]
+    ]
+  ]
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+;; ------------------------------------------------------------------------------------------------------
+
+to-report region-setup
+  ; WORLD CONTEXT
+  
+  let region-setup-data read-data-from-file (word gbl.data-path "region-data.csv") true
+  
+  foreach region-setup-data [
+    let data ?
+    let x first data     set data butfirst data
+    let y first data     set data butfirst data
+    ask patch x y [
+      set pch.country-name first data     set data butfirst data
+      set pch.region-name first data      set data butfirst data
+      set pcolor blue
+      set plabel (word pch.country-name "//" pch.region-name)
+      sprout-regions 1 [ 
+        set shape "circle"
+        set size 0.1
+        set color red  
+        set rgn.country-name [pch.country-name] of myself
+        set rgn.region-name  [pch.region-name] of myself
+        set rgn.full-name (word rgn.country-name "/" rgn.region-name)
+        set rgn.wageK first data           set data butfirst data
+        set rgn.wageL-base first data      set data butfirst data
+        set rgn.wageL rgn.wageL-base
+        set rgn.wage-change first data     set data butfirst data
+        set rgn.interest-rate first data   ;set data butfirst data
+        set rgn.localities-here no-turtles
+      ]
+    ]
+  ]
+  
+  ; find the center of each country and put an agent there.
+  ; first, find all the countries.
+  let cntries remove-duplicates [rgn.country-name] of regions
+  foreach cntries [
+    let rgns regions with [rgn.country-name = ?]
+    let x mean [pxcor] of rgns
+    let y mean [pycor] of rgns
+    hatch-countries 1 [
+      set xcor x
+      set ycor y
+      set ctry.name ?
+      set shape "circle"
+      set size 0.10
+      set color green
+      ask rgns [ set rgn.country-agent myself]
+    ]
+  ]
+  
+  ask countries [ 
+    create-country-links-with other countries [
+      set hidden? false 
+      set ctyl.distance link-length
+    ]      
+  ]
+  
+  report regions
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+;; ------------------------------------------------------------------------------------------------------
+
+to-report industry-setup
+  ; WORLD CONTEXT
+  
+  let industry-setup-data read-data-from-file (word gbl.data-path "industry-data.csv") true
+  
+  foreach industry-setup-data [
+    hatch-industries 1 [
+      set ind.world myself
+      set hidden? true
+      set ind.report-results? true
+      set ind.prune-by-region? false
+      set ind.biggest-loser-reporter "first frm.profit-forecast"
+      
+      let data ?
+      set ind.name first data                    set data butfirst data
+      set ind.icon-size first data               set data butfirst data
+      set ind.icon-offset first data             set data butfirst data
+      set ind.icon-shape first data              set data butfirst data
+      set ind.icon-color first data              set data butfirst data
+      set ind.follow-me first data               set data butfirst data
+      set ind.max-industry-closers first data    set data butfirst data
+      set ind.max-regional-closers first data    set data butfirst data
+      set ind.shipment-min first data            ;set data butfirst data
+      
+      set ind.firm-set no-turtles
+      set ind.firm-set-list []
+      set ind.markets no-turtles
+      set ind.localities no-turtles
+      
+      set ind.pattern-list []
+      
+      let locality-setup-data read-data-from-file (word gbl.data-path ind.name "-localities-data.csv") true
+      foreach locality-setup-data [
+        hatch-localities 1 [
+          set shape "house"
+          set size 0.10
+          set color black
+          set hidden? true
+          set lcl.ind-agent myself
+          set lcl.ind-name [ind.name] of myself
+          ask myself [ set ind.localities (turtle-set ind.localities myself) ]
+          
+          locality-setup ?
+          
+          move-to one-of patches with [pch.country-name = [lcl.country-name] of myself AND pch.region-name = [lcl.region-name] of myself]
+          set lcl.my-patch patch-here
+          set lcl.region-agent one-of regions-here
+        ]
+      ]
+      
+      let market-setup-data read-data-from-file (word gbl.data-path ind.name "-markets-data.csv") true
+      foreach market-setup-data [
+        hatch-markets 1 [
+          set shape "square"
+          set size 0.10
+          set color red 
+          set hidden? true
+          set mkt.ind-agent myself
+          set mkt.ind-name [ind.name] of myself
+          ask myself [ set ind.markets (turtle-set ind.markets myself) ]
+          
+          market-setup ?
+          
+          move-to one-of patches with [pch.country-name = [mkt.country-name] of myself AND pch.region-name = [mkt.region-name] of myself]
+          set mkt.my-patch patch-here 
+          set mkt.region-agent one-of regions-here
+        ]
+      ]
+      
+      let ind-localities ind.localities
+      let ind-markets ind.markets
+      
+      ;; notify any market in the region of a locality, and record the market for 
+      ;; the locality's own use.
+      ask ind.localities [
+        let mktshere ind-markets with [mkt.country-name = [lcl.country-name] of myself AND mkt.region-name = [lcl.region-name] of myself]
+        if any? mktshere [
+          let mymkt one-of mktshere  ;; there is only one, but ...
+          ask mymkt [set mkt.locality-in-region myself]
+          set lcl.market-in-region mymkt
+        ]
+      ]
+      
+      ; create commercial links between the localities and the markets.
+      ask ind.localities [ 
+        create-commercial-links-to ind-markets [
+          set hidden? true
+          set clnk.lcl-name [lcl.name] of end1
+          set clnk.mkt-name [mkt.name] of end2
+          set clnk.name (word clnk.lcl-name "->" clnk.mkt-name)
+          set clnk.ind-name [lcl.ind-name] of myself
+          set clnk.tariff-rate 0.0
+          set clnk.unit-tariff 0.0
+          set clnk.subsidy-rate 0.0
+          set clnk.unit-subsidy 0.0
+          set clnk.is-export-link? ifelse-value ([lcl.country-name] of end1 != [mkt.country-name] of end2) [true] [false] 
+        ]
+      ]
+      set ind.commercial-links commercial-links with [clnk.ind-name = [ind.name] of myself]
+      
+;      ask ind.localities [ set lcl.shipments-by-market n-values count ind-markets [0] ]
+;      ask ind.markets    [ set mkt.sales-by-region n-values count ind-localities [0]]
+      
+    ] ; end of one industry creation.
+    
+  ] ; end of all industry creations.
+   
+    report industries
+    
+  end
+  
+  
+;    set lcl.distance-to-market map [distance ?] [ind.marketlist] of lcl.ind-agent
+  
+;; ------------------------------------------------------------------------------------------------------
+    
+to locality-setup [ locality-data ]
+  ;; this procedure initializes each production region for this industry by setting its 
+  ;; industry-locality variables.
+  
+  ;; LOCALITY CONTEXT
+  
+  let data locality-data
+  
+  let ind-name first data        set data butfirst data
+  if ind-name != lcl.ind-name [
+   show (word "Industry names do not match: " lcl.ind-name ind-name)
+   kickout
+  ]
+  set lcl.country-name first data       set data butfirst data
+  set lcl.region-name first data        set data butfirst data
+  set lcl.name (word lcl.country-name "/" lcl.region-name)
+
+  ;; these define the industry technology for this region.
+  set lcl.pf-A first data        set data butfirst data
+  set lcl.pf-alpha first data    set data butfirst data
+  set lcl.pf-beta first data     set data butfirst data
+  set lcl.pf-sigma first data    set data butfirst data
+  set lcl.pf-rho (lcl.pf-sigma - 1) / lcl.pf-sigma
+
+  set lcl.costs-random-normal? first data  set data butfirst data
+  set lcl.pf-A-range first data            set data butfirst data
+  set lcl.pf-A-stddev first data           set data butfirst data
+   
+  set lcl.begin-with-n first data                   set data butfirst data
+  set lcl.initial-capacity first data               set data butfirst data
+  set lcl.initial-capital-stock first data          set data butfirst data
+  set lcl.initial-capital-stock-range first data    set data butfirst data
+  set lcl.capacity-cushion first data               set data butfirst data
+  set lcl.depreciation-rate first data              set data butfirst data
+  set lcl.capacity-adj-factor first data            set data butfirst data
+  set lcl.K-adjustment-factor first data            set data butfirst data
+    
+  set lcl.shipments-lookback first data             set data butfirst data
+  set lcl.max-shipment-change first data            set data butfirst data
+  set lcl.minimum-export first data                 set data butfirst data
+  set lcl.market-entry-payback-period first data    set data butfirst data
+  
+  set lcl.startup-cost first data                   set data butfirst data
+  set lcl.interest-rate first data                  set data butfirst data
+  
+  set lcl.avgProfit-lookback first data             set data butfirst data
+;  set lcl.profit-threshhold first data             set data butfirst data
+  set lcl.model-firm-%tile first data               set data butfirst data
+  set lcl.biggest-loser-reporter first data         set data butfirst data
+  
+  set lcl.fallow-period first data                  set data butfirst data
+  set lcl.max-losers first data                     set data butfirst data
+  
+  set lcl.external-econ-ub first data               set data butfirst data
+  set lcl.external-econ-alpha first data            set data butfirst data
+  set lcl.external-econ-nstar first data            ; set data butfirst data
+  
+  set lcl.firm-n 0
+  set lcl.firm-set no-turtles
+  set lcl.initial-cash-balance gbl.initial-cash-balance
+  set lcl.producer-pruned? false
+  set lcl.producer-added? false
+  set lcl.market-in-region nobody
+
+end  ;; of locality-setup
+
+;; ------------------------------------------------------------------------------------------------------
+
+to market-setup [ market-data ]
+  
+  ; MARKET CONTEXT
+  
+  let data market-data
+  
+  let ind-name first data          set data butfirst data
+  if ind-name != mkt.ind-name [
+    show (word "Industry names do not match: " mkt.ind-name ind-name)
+    kickout
+  ]
+  set mkt.country-name first data       set data butfirst data
+  set mkt.region-name first data        set data butfirst data
+  set mkt.name (word mkt.country-name "/" mkt.region-name)
+  
+  set mkt.size first data                    set data butfirst data
+  set mkt.sigma first data                   set data butfirst data
+  set mkt.elasticity first data              set data butfirst data
+  
+  set mkt.sales-cost-max-discount first data          set data butfirst data
+  set mkt.sales-cost-free-ride-factor first data      set data butfirst data
+  set mkt.entry-cost first data                       set data butfirst data
+  set mkt.marketing-cost-rate first data              set data butfirst data
+  set mkt.marketing-cost-unit-charge first data       set data butfirst data
+  
+  set mkt.supplier-pruned? false
+  set mkt.supplier-added? false
+  
+  set mkt.Pbar-lookback gbl.forecast-lookback
+  
+  set mkt.locality-in-region nobody
+  
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------  
+
+to world-setup
+
+  ;; WORLD CONTEXT
+  
+  ; set up the geography of our world:
+  set wld.regions region-setup
+  
+  ; now that we have our geography set up, create the industries.
+  ; They in turn will create the localities and markets.
+  set wld.industries industry-setup
+  
+  ; create and setup the industry labels for each region.
+  industry-label-setup
+  
+  ;; Each region keeps track of all the industry localities, markets and labels that are in it.
+  ask wld.regions [
+    set rgn.localities-here localities-here
+    set rgn.markets-here markets-here
+    set rgn.labels-here industry-labels-here
+  ]
+  
+  ask wld.industries [
+    trade-policy-clear-all
+    set ind.transport-cost 0.0
+  ]
+  
+  ; Load the predetermined policy changes for this run as they may affect how the industry
+  ; is populated with firms.
+  set wld.policy-schedule policy-load-changes
+  scheduler:perform-scheduled-tasks wld.policy-schedule 0
+  
+  BehaviorSpace-value-set
+  
+  ; and finally ask each industry to populate itself with firms
+  ask wld.industries [ populate-with-firms ]
+  
+end  ;; of world-setup
+
+;; ------------------------------------------------------------------------------------------------------
+
+to BehaviorSpace-value-set
+  ; ==============================================================
+  ; we try to take care of all the behaviorspace variables here.
+  
+  if behaviorspace-run-number > 0 [
+    
+    if bsp.transport-cost >= 0 [
+      ask wld.industries [set ind.transport-cost bsp.transport-cost]
+    ]
+    
+    if bsp.pf-A-stddev >= 0 [
+      ask wld.industries [
+        ask ind.localities [
+          set lcl.pf-A-stddev bsp.pf-A-stddev 
+        ]
+      ] 
+    ]
+    
+    if bsp.follow-me >= 0 [
+      ask wld.industries [set ind.follow-me bsp.follow-me]
+    ]
+    
+    if bsp.wage-factor != 0 [
+      ask wld.regions [
+        set rgn.wageL rgn.wageL-base + bsp.wage-factor * rgn.wage-change
+      ] 
+    ]
+    
+    if bsp.external-econ-ub >= 0 [
+      ask wld.industries [
+        ask ind.localities [
+          set lcl.external-econ-ub bsp.external-econ-ub
+        ]
+      ]
+    ]
+    
+  ]
+    
+    
+  ; ==============================================================
+end
+  
+;; ------------------------------------------------------------------------------------------------------
+
+to-report pattern-set-list [ pattern-list ]
+  ; puts the variables which we use to detect an equilibrium pattern in the setup in one long list
+  ; and prepends that to the lists from prior iterations. note the rounding of the values as values
+  ; very close to zero need to be rounded to zero in order for % differences to work.
+  
+  ; INDUSTRY CONTEXT
+  
+  let lcllist sort ind.localities
+  let mktlist sort ind.markets
+  
+  let lst []
+  foreach mktlist [
+    set lst lput %precision1 [mkt.suppliers] of ? lst
+  ]
+  
+  foreach lcllist [
+    set lst lput %precision1 [lcl.export-shipments] of ? lst
+  ]
+  
+  foreach mktlist [
+    set lst lput %precision1 [mkt.import-shipments] of ? lst
+  ]
+  
+  foreach mktlist [
+    set lst lput %precision1 [mkt.Pbar] of ? lst
+  ]
+  
+;  foreach lcllist [
+;    set lst lput %precision1 [lcl.avgProfit] of ? lst
+;  ]
+  
+  foreach lcllist [
+    let A ifelse-value (any? [lcl.firm-set] of ?) [mean [frm.A] of ([lcl.firm-set] of ?)] [0.0]
+    set lst lput %precision1 A lst
+  ]
+  
+  report fput lst pattern-list
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+;; ------------------------------------------------------------------------------------------------------
+
+to-report pattern-find-%
+  
+  ; reports a % tolerance >= gbl.pattern-%-needed that would have yielded a pattern for
+  ; this industry by at the end of the run to find a pattern.  Note that a lower tolerance may have 
+  ; worked ealier in the series, but then that would suggest that that pattern was not really stable.
+  
+  ;INDUSTRY CONTEXT
+  
+  let n gbl.pattern-max-%-allowed - gbl.pattern-%-needed + 1
+  foreach n-values n [? + gbl.pattern-%-needed] [
+    if (%pattern-find-in ind.pattern-list 1 gbl.pattern-length-needed ?) > 0 [
+      report ?
+    ]
+  ]
+  
+  report gbl.pattern-max-%-allowed + 1
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+to pattern-report
+  
+  if pattern-find-% > gbl.pattern-max-%-allowed [
+    print-message gbl.cmd (word "No pattern found for industry " ind.name " within a tolerance of " gbl.pattern-max-%-allowed "%.")
+    ;  print-message gbl.opt sublist ind.pattern-list 0 gbl.pattern-length-needed
+    
+    let avg []
+    let sd []
+    let aad []
+    let slist sublist ind.pattern-list 0 gbl.pattern-length-needed
+    foreach n-values (length item 1 ind.pattern-list) [?] [
+      let j ?
+      let xlist map [item j ?] slist
+      let m mean xlist
+      set avg lput m avg
+      set sd lput standard-deviation xlist sd
+      set aad lput mean map [abs (m - ?)] xlist aad
+    ]
+    print-message gbl.cmd (word "means: " avg)
+    print-message gbl.cmd (word "standard deviations: " sd)
+    print-message gbl.cmd (word "avg abs deviations: " aad)
+    
+  ]
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+to industry-label-setup
+  ; Create industry labels for each producing and consuming region.
+  ; WORLD CONTEXT
+  
+  let ind-list sort wld.industries
+  ask wld.regions [
+    foreach ind-list [
+      hatch-industry-labels 1 [
+        set lbl.ind-name [ind.name] of ?
+        ;; note that for any given industry, there's never more than one locality and market per 
+        ;; region (patch).  However, there may be none, and "one-of" handles that gracefully by 
+        ;; returning "nobody".  The alternative "first [self] of ...-here throws an error when the 
+        ;; list is empty.
+        set lbl.my-locality one-of localities-here with [lcl.ind-name = [ind.name] of ?]
+        set lbl.my-market one-of markets-here with [mkt.ind-name = [ind.name] of ?]
+        
+        set size [ind.icon-size] of ?
+        set shape [ind.icon-shape] of ?
+        set heading 90
+        set color [ind.icon-color] of ?
+        set label-color white
+        set lbl.offset [ind.icon-offset] of ?
+        ; region agents can refer directly to the patch variables of the patch on which they are.
+        setxy (pxcor + item 0 lbl.offset) (pycor + item 1 lbl.offset)
+        label-update
+      ]
+    ]
+  ]
+  
+  ask wld.industries [ set ind.labels industry-labels with [lbl.ind-name = [ind.name] of myself] ]
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+to profile-setup [ option ]
+  
+  ifelse (option = gbl.profile-start) [
+    profiler:start
+    print-message gbl.opt "The Profiler has been started."
+  ]
+  [
+    ifelse (option = gbl.profile-end) [
+    profiler:stop
+    let profile-file (word gbl.results-path gbl.setup-profile)
+    if file-exists? profile-file [file-delete profile-file]
+    file-open profile-file
+    file-print profiler:report
+    file-close 
+    profiler:reset
+    print-message gbl.opt (word "The Profiler has written the setup profile to " gbl.setup-profile ".")
+    ]
+    [
+      error "Invalid profiler option."
+    ]
+  ]
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+;; ------------------------------------------------------------------------------------------------------
+;; ------------------------------------------------------------------------------------------------------
+;; ------------------------------------------------------------------------------------------------------
+;; ------------------------------------------------------------------------------------------------------
+
+
+
+;; ------------------------------------------------------------------------------------------------------
+
+
+
+;; ------------------------------------------------------------------------------------------------------
+;;                          END OF THE SETUP PROCEDURES
+;; ------------------------------------------------------------------------------------------------------

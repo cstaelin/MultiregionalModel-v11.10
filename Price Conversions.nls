@@ -1,0 +1,155 @@
+;; These procedures convert exfactory to fob to cif to market prices, and vice versa.
+
+;; ------------------------------------------------------------------------------------------------------
+
+;; reports the firm's CIF price for a given market as a function of the domestic market price. 
+;;
+;; SHIPMENT AGENT CONTEXT
+
+to-report cif-from-link-mktprice-discounted
+  
+  report ifelse-value (shpa.mktprice-discounted = gbl.NA) 
+    [gbl.NA] 
+    [(shpa.mktprice-discounted - shpa.unit-tariff) / (1 + shpa.tariff-rate)]
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+;; reports the firm's FOB price for a given market as a function of the CIF price for that market 
+;;
+;; SHIPMENT AGENT CONTEXT
+
+to-report fob-from-link-cif
+  
+  report ifelse-value (shpa.cif = gbl.NA) [gbl.NA] [shpa.cif - shpa.unit-freight-cost]
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+;; reports the firm's net ex-factory price for a given market as a function of the fob price.
+;; NOTE that an export subsidy rate is assumed to be applied to the FOB price
+;;
+;; SHIPMENT AGENT CONTEXT
+
+to-report netprice-from-link-fob
+  
+  report ifelse-value (shpa.fob = gbl.NA) [gbl.NA] [(shpa.fob * (1 + shpa.subsidy-rate)) + shpa.unit-subsidy]
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+;; reports the firm's fob price for a given market as a function of its net ex-factory price.
+;; NOTE that an export subsidy rate is assumed to be applied to the FOB price
+;;
+;; SHIPMENT AGENT CONTEXT
+
+to-report fob-from-link-netprice
+  
+  report (shpa.netprice - shpa.unit-subsidy) / (1 + shpa.subsidy-rate)
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+;; reports the firm's CIF price for a given market as a function of the FOB price for that market 
+;;
+;; SHIPMENT AGENT CONTEXT
+
+to-report cif-from-link-fob
+  
+  report shpa.fob + shpa.unit-freight-cost
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+;; reports the domestic market price for a given market as a function of the cif price. 
+;;
+;; SHIPMENT AGENT CONTEXT
+
+to-report mktprice-from-link-cif
+  
+  report (shpa.cif * (1 + shpa.tariff-rate)) + shpa.unit-tariff
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+to-report netprice-from-mktprice-discounted [ P ]
+  
+  ; SHIPMENT AGENT CONTEXT
+  
+  if (P = gbl.NA) [report P]
+  
+  report ( ( ((P - shpa.unit-tariff) / (1 + shpa.tariff-rate)) - shpa.unit-freight-cost) * (1 + shpa.subsidy-rate) )
+             + shpa.unit-subsidy
+ 
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+;; reports the firm's fob price for a given market as a function of its net ex-factory price.
+;; NOTE that an export subsidy rate is assumed to be applied to the FOB price
+;;
+;; NO CONTEXT ASSUMED
+
+to-report fob-from-netprice [ shpmnt price ]
+  
+  report ifelse-value (price = gbl.NA) 
+                     [gbl.NA] [(price - [shpa.unit-subsidy] of shpmnt) / (1 + [shpa.subsidy-rate] of shpmnt)]
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+;; reports the firm's CIF price for a given market as a function of the FOB price for that market 
+;;
+;; NO CONTEXT ASSUMED
+
+to-report cif-from-fob [ shpmnt price ]
+  
+  report ifelse-value (price = gbl.NA) [gbl.NA] [price + [shpa.unit-freight-cost] of shpmnt]
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+;; ------------------------------------------------------------------------------------------------------
+
+;; reports the domestic market price for a given market as a function of the cif price. 
+;;
+;; NO CONTEXT ASSUMED
+
+to-report mktprice-discounted-from-cif [ shpmnt price ]
+  
+  report ifelse-value (price = gbl.NA) 
+                     [gbl.NA] [(price * (1 + [shpa.tariff-rate] of shpmnt)) + [shpa.unit-tariff] of shpmnt]
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+;; Update the CIF, FOB and netprice in this shipment link from the link's discounted market price.
+;; shpa.mktprice-discounted = gbl.NA indicates there there are no sales to this market, so all the other prices
+;; are set to NA as well.  NOTE that if shpa.mktprice-discounted is low enough, any or all of shpa.CIF, shpa.FOB
+;; and dshpa.netprice can be negative. Firms would not have planned on this, but it might occur in clearing
+;; the market.
+;;
+;; SHIPMENT AGENT CONTEXT
+
+to update-shipment-prices
+  
+  set shpa.CIF ifelse-value (shpa.mktprice-discounted = gbl.NA) 
+    [gbl.NA] 
+    [(shpa.mktprice-discounted - shpa.unit-tariff) / (1 + shpa.tariff-rate)]
+  set shpa.FOB ifelse-value (shpa.CIF = gbl.NA) [gbl.NA] [shpa.CIF - shpa.unit-freight-cost]
+  set shpa.netprice ifelse-value (shpa.FOB = gbl.NA) [gbl.NA] [(shpa.fob * (1 + shpa.subsidy-rate)) + shpa.unit-subsidy]
+  
+;  if shpa.netprice < 0 and shpa.netprice != gbl.NA [show shpa.mktprice-discounted  kickout]
+ 
+end
+      
+;; ------------------------------------------------------------------------------------------------------  
+;; ------------------------------------------------------------------------------------------------------  

@@ -1,0 +1,179 @@
+globals [ 
+  gbl.method-table         ; holds the various solution methods.
+  gbl.best-method
+  gbl.max-difference
+  gbl.worst-soln-sigma
+  gbl.worst-soln-mean
+  ]
+
+;; ------------------------------------------------------------------------------------------------------
+
+to set-profitmax-methods-table
+  
+  set gbl.profitmax-precision 4  ;; precision in decimal places to be achieved in maximizing profit.
+  
+  set gbl.method-table table:make
+  table:put gbl.method-table "Simplex" task [simplex ?1 ?2 ?3 ?4] 
+  table:put gbl.method-table "Simplex-NM" task [simplex-nm ?1 ?2 ?3 ?4] 
+  table:put gbl.method-table "Simplex-MD" task [simplex-md ?1 ?2 ?3 ?4] 
+  table:put gbl.method-table "BOBYQA-minimize" task [BOBYQA-minimize ?1 ?2 ?3 ?4] 
+  table:put gbl.method-table "CGS-minimize" task [CGS-minimize ?1 ?2 ?3 ?4] 
+  table:put gbl.method-table "CDS-minimize" task [CGS-minimize ?1 ?2 ?3 ?4] 
+  table:put gbl.method-table "CMAES-minimize" task [CGS-minimize ?1 ?2 ?3 ?4] 
+  
+  set gbl.best-method n-values table:length gbl.method-table  [0];
+  set gbl.worst-soln-sigma n-values table:length gbl.method-table  [0];
+  set gbl.worst-soln-mean n-values table:length gbl.method-table  [0];
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+to-report set-bounds [ xvec lbounds ubounds ]
+  
+  ; Some of the solution methods (particularly those using Apache code) require the initial guess
+  ; lie strictly within the bounds.  So, in addition to setting the bounds for the solution, this
+  ; procedure modifies xvec to produce a guess within the bounds.  Note that we assume that the upper
+  ; and lower bounds are at least 0.02 units apart.
+  
+  numanal:bounds-set frm.profitmax-lbounds frm.profitmax-ubounds
+  let guess (map [ifelse-value (?1 <= ?2) [?2 + 0.01] [?1]] xvec  frm.profitmax-lbounds)
+  set guess (map [ifelse-value (?1 >= ?2) [?2 - 0.01] [?1]] guess frm.profitmax-ubounds)
+  
+  report guess
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+to-report simplex [ xvec mapping lbounds ubounds ]  
+  set gbl.return-type "scalar"
+  let rtol (10 ^ (- gbl.profitmax-precision))
+  let atol (10 ^ ((- gbl.profitmax-precision) * 2))
+  let side-length larger-of 1 (0.10 * min xvec)
+;  show side-length
+  let guess set-bounds xvec lbounds ubounds
+  report (numanal:simplex xvec mapping side-length rtol atol)
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+to-report simplex-nm [ xvec mapping lbounds ubounds ]  
+  set gbl.return-type "scalar"
+  let rtol 0.0
+;  let rtol (10 ^ (- gbl.profitmax-precision))
+  let atol (10 ^ ((- gbl.profitmax-precision) * 2))
+  let side-length larger-of 1 (0.10 * min xvec)
+  ; The guess must lie strictly inside the bounds for this method.
+  let guess set-bounds xvec lbounds ubounds
+  report (numanal:simplex-nm guess mapping side-length rtol atol)
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+to-report simplex-md [ xvec mapping lbounds ubounds ]  
+  set gbl.return-type "scalar"
+  let rtol 0.0
+;  let rtol (10 ^ (- gbl.profitmax-precision))
+  let atol (10 ^ ((- gbl.profitmax-precision) * 2))
+  let side-length larger-of 1 (0.10 * min xvec)
+  ; Although zero is the lower bound, the guess must lie strictly inside the bounds for this method.
+  let guess set-bounds xvec lbounds ubounds
+  report (numanal:simplex-md guess mapping side-length rtol atol)
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+to-report BOBYQA-minimize [ xvec mapping lbounds ubounds ]
+  set gbl.return-type "scalar"
+  ifelse length xvec >= 2 [
+    ;  let initial-radius larger-of 1 (0.8 * min xvec)
+    let initial-radius 0    ; use the default
+    let stop-radius 1.0e-6  ; the default of 1.0e-8 seems to small - leads to an error.
+      ; Although zero is the lower bound, the guess must lie strictly inside the bounds for this method.
+    let guess set-bounds xvec lbounds ubounds
+    report (numanal:BOBYQA-minimize guess mapping initial-radius stop-radius)
+  ]
+  [
+    let ub 1000
+    let rslt numanal:brent-minimize (task [neg-expected-profits-univariate ?]) 0.0 ub 1.0e-6
+    if rslt >= ub [show "Brent-maximize hit the upper bound."]
+    report (list rslt)
+  ]
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+to-report CGS-minimize [ xvec mapping lbounds ubounds ]
+  set gbl.return-type "scalar"
+  ; Although zero is the lower bound, the guess must lie strictly inside the bounds for this method.
+  let guess set-bounds xvec lbounds ubounds
+  report (numanal:CGS-minimize guess mapping 1.0e-6 1.0e-6 0 10000 0)
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+to-report CDS-minimize [ xvec mapping lbounds ubounds ]
+  set gbl.return-type "scalar"
+  ; Although zero is the lower bound, the guess must lie strictly inside the bounds for this method.
+  let guess set-bounds xvec lbounds ubounds
+  report (numanal:CDS-minimize guess mapping 1.0e-6 1.0e-6 0 10000 0 true)
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+to-report CMAES-minimize [xvec mapping lbounds ubounds ]
+  set gbl.return-type "scalar"
+  ; Although zero is the lower bound, the guess must lie strictly inside the bounds for this method.
+  let guess set-bounds xvec lbounds ubounds
+  report numanal:CMAES-minimize guess mapping map [? / 2.0] guess
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+to-report test-methods [ xvec ]
+  
+  let method-list table:keys gbl.method-table
+  let solns []
+  let rslts []
+  set gbl.max-difference 0
+  foreach method-list [
+    let soln (runresult table:get gbl.method-table gbl.solution-method xvec)
+    set solns lput soln solns
+    set rslts lput (neg-expected-profits soln) rslts
+  ]
+  
+  foreach n-values (length item 0 solns) [?] [
+    let j ?
+    let qlist map [item j ?] solns
+    let sigma standard-deviation qlist
+    let avg mean qlist
+    let mx [0.0 -1]
+    (foreach qlist (n-values length qlist [?]) [
+      if abs (?1 - avg) > (sigma * 0.90) [
+        set gbl.worst-soln-sigma replace-item ?2 gbl.worst-soln-sigma ((item ?2 gbl.worst-soln-sigma) + 1)
+      ]
+      if abs (?1 - avg) > item 0 mx [
+        set mx list (?1 - avg) ?2
+      ] 
+    ])
+    if item 1 mx != -1 [
+      set gbl.worst-soln-mean replace-item (item 1 mx) gbl.worst-soln-mean ((item (item 1 mx) gbl.worst-soln-mean) + 1)
+    ]
+  ]
+  
+  let mx max rslts
+  let mn min rslts
+  let j position mx rslts
+  set gbl.best-method replace-item j gbl.best-method ((item j gbl.best-method) + 1)
+  
+  set gbl.max-difference larger-of (mx - mn) gbl.max-difference
+  if (mx - mn) > ((larger-of abs mx abs mn) * 0.0001) [ show rslts show solns]
+  
+  report item j solns
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+;; ------------------------------------------------------------------------------------------------------
+;; ------------------------------------------------------------------------------------------------------

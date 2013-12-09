@@ -1,0 +1,179 @@
+;; In this source file we have data and procedures related to policy variables, and changes in policy.
+
+;; ------------------------------------------------------------------------------------------------------
+
+to-report industry-named [ name ]
+  report industries with [ind.name = name]
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+to-report policy-load-changes
+  
+  let policy-setup-data read-data-from-file (word gbl.data-path gbl.policy-data) true
+  
+  let policy-schedule scheduler:create
+  foreach policy-setup-data [
+    let period item 0 ?
+    let policy item 1 ?
+    let value item 2 ?
+    let ind item 3 ?
+    let src ifelse-value (policy != "TC") [item 4 ?] [""]
+    let dest ifelse-value (policy != "TC") [item 5 ?] [""]
+    
+    if policy = "TC" [scheduler:add policy-schedule industry-named ind task [tc-set value] period]
+    if policy = "unit-tariff" [scheduler:add policy-schedule industry-named ind task [unittar-set dest src value] period]
+    if policy = "tariff-rate" [scheduler:add policy-schedule industry-named ind task [tarrate-set dest src value] period]
+    if policy = "unit-subsidy" [scheduler:add policy-schedule industry-named ind task [unitsub-set src dest value] period]
+    if policy = "subsidy-rate" [scheduler:add policy-schedule industry-named ind task [subrate-set src dest value] period]
+    if policy = "entry-cost" [scheduler:add policy-schedule industry-named ind task [entry-cost-set dest value] period]
+  ]
+  
+  report policy-schedule
+    
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+;; ------------------------------------------------------------------------------------------------------
+
+to trade-policy-clear-all
+  
+  ;; INDUSTRY CONTEXT
+  
+  ask ind.commercial-links [
+    set clnk.tariff-rate 0.0
+    set clnk.unit-tariff 0.0
+    set clnk.subsidy-rate 0.0
+    set clnk.unit-subsidy 0.0
+  ]
+  
+  ask ind.firm-set [
+    ask frm.shipment-agents [
+      set shpa.tariff-rate 0.0
+      set shpa.unit-tariff 0.0
+      set shpa.subsidy-rate 0.0
+      set shpa.unit-subsidy 0.0
+    ]
+  ]
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+to tarrate-set [ mkt src rate ]
+  
+  ; set the tarrif rate on imports into market mkt on goods from locality src.
+  ; NOTE: shipments from localities in the same country are first excluded.
+  
+  ;; INDUSTRY CONTEXT
+  
+  let clinks ind.commercial-links with [clnk.is-export-link?]
+  set clinks ifelse-value (mkt = "ALL") [clinks] [clinks with [[mkt.country-name] of end2 = mkt]]
+  if src != "ALL" [ set clinks clinks with [[lcl.country-name] of end1 = src] ]
+  ask clinks [ 
+    set clnk.tariff-rate  rate 
+    ask shipagents with [shpa.commercial-link = myself] [ set shpa.tariff-rate rate ]
+  ]
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+;; ------------------------------------------------------------------------------------------------------
+
+to unittar-set [ mkt src rate ]
+  
+  ; set the unit tarrif on imports into market mkt on goods from locality src.
+  ; NOTE: shipments from localities in the same country are first excluded.
+  
+  ;; INDUSTRY CONTEXT
+
+  let clinks ind.commercial-links with [clnk.is-export-link?]
+  set clinks ifelse-value (mkt = "ALL") [clinks] [clinks with [[mkt.country-name] of end2 = mkt]]
+  if src != "ALL" [ set clinks clinks with [[lcl.country-name] of end1 = src] ]
+  ask clinks [ 
+    set clnk.unit-tariff  rate 
+    ask shipagents with [shpa.commercial-link = myself] [ set shpa.unit-tariff rate ]
+  ]
+  
+end
+
+
+;; ------------------------------------------------------------------------------------------------------
+
+to subrate-set [ lcl mkt rate ]
+  
+  ; set the subsidy rate on exports to market mkt on goods from locality src.
+  ; NOTE: shipments to markets in the same country are first excluded.
+  
+  ;; INDUSTRY CONTEXT
+  
+  let clinks ind.commercial-links with [clnk.is-export-link?]
+  set clinks ifelse-value (lcl = "ALL") [clinks] [clinks with [[lcl.country-name] of end1 = lcl]]
+  if mkt != "ALL" [ set clinks clinks with [[mkt.country-name] of end2 = mkt] ]
+  ask clinks [ 
+    set clnk.subsidy-rate  rate 
+    ask shipagents with [shpa.commercial-link = myself] [ set shpa.subsidy-rate rate ]
+  ]
+
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+to unitsub-set [ lcl mkt rate ]
+  
+  ; set the unit subsidy on exports to market mkt on goods from locality src.
+  ; NOTE: shipments to markets in the same country are first excluded.
+  
+  ;; INDUSTRY CONTEXT
+  
+  let clinks ind.commercial-links with [clnk.is-export-link?]
+  set clinks ifelse-value (lcl = "ALL") [clinks] [clinks with [[lcl.country-name] of end1 = lcl]]
+  if mkt != "ALL" [ set clinks clinks with [[mkt.country-name] of end2 = mkt] ]
+  ask clinks [ 
+    set clnk.unit-subsidy  rate 
+    ask shipagents with [shpa.commercial-link = myself] [ set shpa.unit-subsidy rate ]
+  ]
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+to tc-set [ tc ]
+  
+  ; set the transportation cost per unit distance for this industry's good.
+  
+  ;; INDUSTRY CONTEXT
+  
+  set ind.transport-cost tc
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+to entry-cost-set [ mkt costs ]
+  
+  ; set the cost of marketing exports to the given market.  "costs" is a list of three types of cost: 
+  ; a fixed cost of initial entry, an ongoing marketing cost as a percentage of sales, and an 
+  ; ongoing per unit marketing cost.
+  
+  ; INDUSTRY CONTEXT
+  
+  let mkts ifelse-value (mkt = "ALL") [ind.markets] [ind.markets with [mkt.country-name = mkt]]
+  
+  ask mkts [
+    set mkt.entry-cost item 0 costs
+    set mkt.marketing-cost-rate item 1 costs
+    set mkt.marketing-cost-unit-charge item 2 costs
+  ]
+  
+  ask turtle-set [frm.shipment-agents] of ind.firm-set [
+    ; Entry and marketing costs apply only to export markets.
+    set shpa.entry-cost ifelse-value shpa.is-export-link? [[mkt.entry-cost] of shpa.market] [0]
+    set shpa.marketing-cost-rate ifelse-value shpa.is-export-link? [[mkt.marketing-cost-rate] of shpa.market] [0]
+    set shpa.marketing-cost-unit-charge ifelse-value shpa.is-export-link? [[mkt.marketing-cost-unit-charge] of shpa.market] [0]
+  ]
+  
+end
+;; ------------------------------------------------------------------------------------------------------
+;; ------------------------------------------------------------------------------------------------------

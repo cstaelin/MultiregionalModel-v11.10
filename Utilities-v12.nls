@@ -1,0 +1,822 @@
+
+;;                     A SERIES OF USEFUL REPORTERS
+
+;; ------------------------------------------------------------------------------------------------------
+
+
+;; A reporter similar to "precision" that works on all the numeric elements in (nested) lists.
+;; Although intended for lists, lst may be a scalar as well.
+
+to-report myprecision [ lst p ]
+  
+  ifelse is-number? lst [report precision lst p] [ifelse is-list? lst [report map [myprecision ? p] lst] [report lst]]
+  
+end
+  
+;; ------------------------------------------------------------------------------------------------------
+
+;; Sets the precision of nbr to the number of decimal places represented by 1% of its value, except if 
+;; abs nbr < 0.0001, in which case it returns zero.
+
+to-report %precision1 [ nbr ]
+  
+  let absnbr abs nbr    
+  if (absnbr < 0.0001) [report 0]
+  let p (floor log absnbr 10) - 2
+  report sign nbr * precision absnbr (- p)
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+;; reports whether x and y are approximately equal, i.e., are equal to the p'th decimal place.
+;; x and y may be single values or (nested) lists.  Only numbers are rounded before being checked for
+;; equality, but all elements in the respective lists much match for the lists to be equal.
+
+to-report approx-equal [x y p]
+  
+  let a myprecision x p
+  let b myprecision y p
+  report (a = b)
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+;; reports whether x and y are approximately equal, i.e., are within p percent of each other.
+;; x and y may be single values or (nested) lists.  Only numbers are checked for approximate 
+;; equality, but all elements in the respective lists much match for the lists to be equal.
+;; Note that for the denominator, we use the larger of abs x and abs y, after checking to see
+;; if both are equal to each other and thus possibly both equal to zero.
+
+to-report %approx-equal [x y p]
+  
+  ifelse is-number? x [ 
+    if x = y [report true]
+    ; Set s to the larger of the abs of x and y. Since x != y, both can not be zero.
+    let s larger-of abs x abs y
+    report (abs (x - y) / s) <= (p / 100.0)
+  ]
+  [
+    ifelse is-list? x [
+      report reduce [?1 and ?2] (map [%approx-equal ?1 ?2 p] x y)
+    ]
+    [
+      report x = y
+    ]
+  ]
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+
+;; Reports the agentset of agents in agentset A that are not in agentset B, that is the complement
+;; of A in A U B.
+;; It works with null agentsets.
+
+to-report complement-of [A B]
+  
+  report B with [not member? self A]
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+;; ------------------------------------------------------------------------------------------------------
+
+;; Reports the intersection of agentset A and agentset B.
+;; It works with null agentsets.
+
+to-report intersection-of [ A B ]
+  
+  report A with [member? self B]
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+;; Reports the set-theoretic difference of agentset A and agentset B, that is the agents in A that 
+;; are not in B.  This may be written A \ B.  This will be the same as the complement of B in A U B.
+
+to-report difference-of [ A B ]
+  
+  report complement-of B A
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+;; ------------------------------------------------------------------------------------------------------
+
+;; removes an agent, agnt, from a turtleset, linkset or list, and reports the result.
+to-report remove-agent [ agnt container ]
+  
+  ifelse is-turtle-set? container [report container with [self != agnt]]
+    [ifelse is-link-set? container [report container with [self != agnt]]
+      [ifelse is-list? container [report remove agnt container]
+        [
+          let mssg (word "Error in remove-agent: invalid container. " (list agnt container))
+          user-message mssg
+        ]
+      ]
+    ]
+    
+end
+
+;; ------------------------------------------------------------------------------------------------------
+;; ------------------------------------------------------------------------------------------------------
+
+;; adds an agent, agnt, to a turtleset, linkset or list, container, and reports the result.
+
+to-report add-agent [ agnt container ]
+
+  ifelse is-turtle-set? container [report (turtle-set agnt container)]
+    [ifelse is-link-set? container [report (link-set agnt container)]
+      [ifelse is-list? container [report lput agnt container]
+        [
+          let mssg (word "Error in add-agent: invalid container. " (list agnt container))
+          user-message mssg
+        ]
+      ]
+    ]
+    
+end
+
+;; ------------------------------------------------------------------------------------------------------
+;; ------------------------------------------------------------------------------------------------------
+
+;; Reports the AGENT in agntset that has the median value of rptr of all the members of the agntset.
+;; If agntset is empty, reports "nobody".  If the agentset has a single member, reports that member.
+;; I assume that this could be much more efficiently done as an extension as procedures don't allow
+;; the passing of reporters, but only values.  Note that lists start with item 0.
+
+to-report median-one-of [ agntset rptr ]
+
+  if not any? agntset [ report nobody ]
+  
+  let cnt count agntset
+  ifelse cnt > 1
+  [
+    let lst sort-by [ (runresult rptr ?1) < (runresult rptr ?2)] agntset
+    ifelse cnt mod 2 != 0
+    [  ;; there is an odd number of elements, simply choose the one in the middle.
+      report item floor (cnt / 2) lst
+    ]
+    [  
+      ;; there is an even number, choose randomly from the two on either side.
+      ;; (We use random 1.5 to get a number between 0 and 1 inclusive.)
+      report item ((cnt / 2) - random 1.5) lst
+    ]
+  ]
+  [
+    report one-of agntset
+  ]
+
+end
+
+;; ------------------------------------------------------------------------------------------------------
+;; ------------------------------------------------------------------------------------------------------
+
+;; Reports the AGENT in agntset that has pcntile of the members of the agntset below it as ranked by
+;; the reporter, rptr.  Note that pcntile is in percent, i.e., ranges from 0 to 100.  Pcntile >= 100% 
+;; reports the agent with the highest value of rptr. Pcntile < 0 will give a run-time error.  If 
+;; agntset is empty, reports "nobody".  If the agentset has a single member, reports that member.
+;; Note too that one can get "funny" results with small agentsets.  Even relatively low values of 
+;; pcntile may yield the agent with the largest value of rptr.
+;; I assume that this could be much more efficiently done as an extension as procedures don't allow
+;; the passing of reporters, but only values.  Note that lists start with item 0.
+;;
+;; NOTE that if pcntile is 50, i.e., 50%, we use the much more accurate "median-one-of" procedure.
+
+to-report percentile-one-of [ agntset pcntile rptr ]
+
+  if (pcntile = 50) [report median-one-of agntset rptr]
+
+  if not any? agntset [ report nobody ]
+  
+  let cnt count agntset
+  ifelse cnt > 1
+  [
+    let lst sort-by [ (runresult rptr ?1) < (runresult rptr ?2)] agntset
+    ifelse pcntile < 100 
+      [
+        let i floor (cnt * pcntile / 100)
+        report item i lst
+      ]
+      [
+        report last lst   ;; pcntile is >= 100%.  report the agent with the highest value.
+      ]
+  ]
+  [
+    report one-of agntset ;; report the only member.
+  ]
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+;; ------------------------------------------------------------------------------------------------------
+
+; Reports the item in the list which has pcntile of the members of the list below it.
+; Note that pcntile is in percent, i.e., ranges from 0 to 100.  Pcntile >= 100% 
+; reports the highest value in the list. Pcntile < 0 or an empty list will give a run-time error.
+; If the list has a single member, reports that member.
+; Note too that one can get "funny" results with short lists.  Even relatively low values of 
+; pcntile may yield the largest item in the list.
+;
+; NOTE that if pcntile is 50, i.e., 50%, we use the canned median primitive.
+
+to-report percentile [ lst pcntile ]
+
+  if (pcntile = 50) [report median lst]
+  
+  let cnt length lst
+  ifelse cnt > 1
+  [
+    set lst sort lst
+    ifelse pcntile < 100 
+      [
+        let i floor (cnt * pcntile / 100)
+        report item i lst
+      ]
+      [
+        report last lst   ;; pcntile is >= 100%.  report the highest value.
+      ]
+  ]
+  [
+    report item 0 lst ;; report the only member.
+  ]
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+;; Reports an arctangent response to the argument x.  The procedure reports zero when x = 0.
+;; "bound" sets the upper and lower assymtotes.  Thus
+;; bound = 0.2 sets the upper assymtote to 0.2 and the lower assymtote to -0.2.
+;; "response" either straightens or accentuates the arctan function.  As response falls below unity, 
+;; the function becomes more "linear" around x = 0 and as response rises above unity the function 
+;; becomes even more curved.
+;; Note that positive values of x result in a positive response and negative values of x result in a
+;; negative response.
+;; Note too that the formula is based on the rather peculiar atan function in NetLogo.  See the 
+;; NetLogo manual.
+
+to-report arctan [ x bound response]
+
+  report bound * ( ( ( (atan (x * response) 1) + 180) mod 360 ) - 180 ) / 90
+
+end
+
+;; ------------------------------------------------------------------------------------------------------
+;; ------------------------------------------------------------------------------------------------------
+
+;; Reports an arctangent response to the argument x, displaced upward by one.  That is, the procedure
+;; reports one when x = 0.  "bound" sets the upper and lower assymtotes.  When 
+;; bound = 1.2,  the upper assymtote is 1.2 and the lower assymtote is 0.8.
+;; "response" either "straightens" or accentuates the arctan function.  As response falls below unity, 
+;; the function becomes more "linear" around x = 0 and as response rises above unity the function 
+;; becomes even more curved.
+;; Note that positive values of x result in a positive response and negative values of x result in a
+;; negative response.
+;; Note too that the formula is based on the rather peculiar atan function in NetLogo.  See the 
+;; NetLogo manual.
+
+to-report arctan+1 [ x bound response]
+
+  report 1 + (bound - 1) * ( ( ( (atan (x * response) 1) + 180) mod 360 ) - 180 ) / 90
+
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+; Reports an exponential response to the argument n: y = n^r, with y being limited to the range 
+; between one and bound between y = 1 and y = at-n.
+; r is calculated such that when n equals at-n, y = bound.  
+; Note, y = 1 when n = 1. For 0 < r < 1, the slope starts more steeply and flattens out as it --> at-n.
+; However, y is not assymtotic to bound; it does pass through it for n > at-n.
+
+to-report exponential-response [ n bound at-n ]
+  
+  let r ln bound / ln at-n
+  report ifelse-value (bound > 1.0) [smaller-of (n ^ r) bound] [larger-of (n ^ r) bound]
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+;; Reports a quasiexponential response to the argument n: y = y0 - r*n^alpha where 0 < alpha <= 1.
+;; y is limited to the range between one and bound.
+;; r is calculated such that when n equals at-n, y = bound.  Thus, although there is no assymtote 
+;; for this response, we can determine its value at an appropriate value of n.
+;; Note: y = 1 when n = 1.  As alpha --> 1, the response becomes more and more 
+;; linear.  If alpha = 0, a run-time error will result.
+
+to-report quasiexponential-response [ n alpha bound at-n ]
+  
+  let r (bound - 1) / (1 - at-n ^ alpha)
+  let y (1 + r) - r * (n ^ alpha)
+  report ifelse-value (bound > 1.0) [smaller-of y bound] [larger-of y bound]
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+; Reports the value of the Gaussian function at x,  where (amax - amin) is the height of the curve 
+; relative to zero, center is the position of the center of the bell-shaped curve, and width is the 
+; width of the curve at one standard deviation from the center.
+; (The curve then begins at amin and reaches amax at the center before falling again.)
+
+to-report Gauss [ x amax amin center width ]
+  
+  ; prevent division by zero.  Could accept a somewhat smaller value.
+  if (width < 1.0E-100) [
+    report ifelse-value (x = center) [amax] [amin]
+  ]
+  
+  report (amax - amin) * exp ( - ((x - center) ^ 2) / (2 * width ^ 2) ) + amin
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+;; Takes a number, num, and pads it on the left with as many instances of the pad-char as it takes 
+;; to make it of length len.  Reports a string.
+  
+to-report pad-left [ num pad-char len ]
+  
+  let str ""
+  repeat len [
+    set str (word str pad-char)
+  ]
+  
+  let numstr (word num)
+  if length numstr >= len [
+    report numstr
+  ]
+  
+  set str (word str numstr)
+  let L length str
+  report substring str (L - len) L
+  
+end  ;; of pad-left
+
+;; ------------------------------------------------------------------------------------------------------
+
+;; Right justifies a number in a fixed-length string, padded on the left with spaces.
+;; The blank string currently allows only 16 blanks on the left.  Adjust if necessary.
+;; Writen by Jim Lyons and posted on NetLogo Users on 11/04/2009.
+
+to-report rj-field [ #value #width ]
+  
+set #value (word #value)
+report word substring "                " 0 (#width - length #value) #value
+
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+
+;; ------------------------------------------------------------------------------------------------------
+
+;; reports the sum of squares of the list x
+;; (Which is faster?!)
+
+to-report sum-of-squares [ x ]
+  
+;;  report reduce [?1 + (?2 * ?2)] fput 0 x
+  report sum map [? * ?] x
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+to-report product [ lst ]
+  
+  report reduce [?1 * ?2] fput 1 lst
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+;; ------------------------------------------------------------------------------------------------------
+;; ------------------------------------------------------------------------------------------------------
+
+;; reports true if there is a recurring pattern in the list, lst, that is if a sublist from 0 to j is 
+;; repeated in the sublist from j to 2j.  lst may be a list of lists.
+;;
+;; Note that we assume that the list has been constructed with the appropriate precision of its members
+;; so that the equality comparison is valid.  We could use "approximately-equal" here, but do not.
+;;
+;; NO CONTEXT ASSUMED
+
+to-report pattern-in? [ lst ]
+  
+  let L length lst
+  if L < 2 [report false]  ;; can't be a pattern with fewer than 2 elements!
+  
+  let j position (first lst) (butfirst lst)
+  if j = false [report false]
+  set j j + 1
+  ifelse (L >= (2 * j)) and (sublist lst 0 j = sublist lst j (2 * j)) [report true] [report false]
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+;; ------------------------------------------------------------------------------------------------------
+
+; reports whether a pattern was found in each of the sublists of inList. No length is assumed for 
+; either inList or its sublists, which may be of different lengths.
+
+to-report pattern-find-in-multiples [ inList len n]
+  
+  let k []
+  foreach inList [
+    let j pattern-find-in ? len n
+    if (j = 0) [ report false ]
+    set k lput j k
+  ]
+  
+  ; a requisite pattern was found in all the sublists. 
+  report true
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+;; ------------------------------------------------------------------------------------------------------
+;; ------------------------------------------------------------------------------------------------------
+;; ------------------------------------------------------------------------------------------------------
+
+to-report %first-repeat [ lst len p ]
+  
+  let pttrn sublist lst 0 len
+  let lst1 sublist lst len length lst
+  let j len
+  while [length pttrn <= length lst1] [
+    if (%approx-equal pttrn sublist lst1 0 length pttrn p) [report j]
+    set pttrn lput first lst1 pttrn
+    set lst1 butfirst lst1
+    set j (j + 1)
+  ]
+  
+  report 0
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+;; reports the length of a sublist beginning at position zero that demonstrates a 
+;; recurring pattern in the list, "lst", that is if the sublist from 0 to j-1 (inclusive) is 
+;; repeated in the sublist from j to 2j-1.  Otherwise reports zero.  lst may be a list of lists.
+;; "len" is the minimum length of the pattern and "n" is the number of consecutive times that the pattern 
+;; must be repeated. n must be >= 1.  Typically for lst being a list of lists, we set len to 1 as that
+;; means the pattern is the whole first list.
+;;
+;; Note that this procedure uses %approx-equal in comparing values and thus takes the argument "p", the
+;; percentage difference allowed before two numbers a considered to be different.
+;;
+;; NO CONTEXT ASSUMED
+
+to-report %pattern-find-in [ lst len n p]
+  
+  let L length lst
+  if L < len [report 0]
+  
+  let j len
+  
+  while [((n + 1) * j) <= L] [
+    
+    let pttrn sublist lst 0 j
+    let i 1
+    let all-match? true
+    let nn smaller-of n ceiling (40 / j)
+    set nn larger-of nn 5
+    while [all-match? and (i <= nn)] [
+      if (not %approx-equal pttrn sublist lst (i * j) ((i + 1) * j) p) [set all-match? false]
+      set i (i + 1)
+    ]
+    
+    if all-match? [report j]
+    
+    set j (j + 1)
+  ]
+    
+  report 0
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+;; reports the length of a sublist beginning at position zero that demonstrates a 
+;; recurring pattern in the list, "lst", that is if the sublist from 0 to j-1 (inclusive) is 
+;; repeated in the sublist from j to 2j-1.  Otherwise reports zero.  lst may be a list of lists.
+;; "len" is the minimum length of the pattern and "n" is the number of consecutive times that the pattern 
+;; must be repeated. n must be >= 1.  Typically for lst being a list of lists, we set len to 1 as that
+;; means the pattern is the whole first list.
+;;
+;; NO CONTEXT ASSUMED
+
+to-report pattern-find-in [ lst len n ]
+  
+  let L length lst
+  if L < len [report 0]
+  
+  let j len
+  
+  while [((n + 1) * j) <= L] [
+    
+    let pttrn sublist lst 0 j
+    let i 1
+    let all-match? true
+    let nn smaller-of n ceiling (40 / j)
+    set nn larger-of nn 5
+    while [all-match? and (i <= nn)] [
+      if (pttrn != sublist lst (i * j) ((i + 1) * j) ) [set all-match? false]
+      set i (i + 1)
+    ]
+    
+    if all-match? [report j]
+    
+    set j (j + 1)
+  ]
+    
+  report 0
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+;; -----------------------------------------------------------------------------------------------------
+;; ------------------------------------------------------------------------------------------------------
+
+;; reports an error and then uses kickout to trace the procedure in which the error occurs.
+
+to throw-error [ message ]
+  
+  user-message message
+  kickout
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+;; intended to allow us to kickout in the middle of a procedure by throwing an error, in this case
+;; a division by zero, at which point we can inspect the extant turtles, links, etc.
+;;
+;; NO CONTEXT ASSUMED (and hopefully will therefore work anywhere)
+
+to kickout
+  
+  let zero 0
+  let bomb 1 / zero
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+;; Reports the sublist of lst which begins at element at postion m (inclusive) and ends at 
+;; element at position n (exclusive).  The length of the sublist is therefore (n - m). The list begins 
+;; with position number 0 and the last element in the list is at position (length - 1).  Thus 
+;; sublist lst 0 length is the entire list.
+;; If m lies beyond the end of the list, reports the empty list.
+;; If there are fewer than (n - m) elements from m to the end of the list, reports that smaller sublist.
+
+to-report mysublist [ lst m n ]
+  
+  let len length lst
+  
+  if m >= len [ report [] ]
+  
+  report sublist lst m (smaller-of n len)
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+;; pushes the value on the front of the lst while insuring that the list never exceeds maxlen in length.
+
+to-report list-push [ value lst maxlen ]
+
+  report ifelse-value (length lst = maxlen) [fput value butlast lst] [fput value lst]
+  
+end  ;; of list-push
+
+;; ------------------------------------------------------------------------------------------------------
+
+to-report all-non-negative? [ lst ]
+  
+  ; reports true if all the elements of lst are strictly non-negative.  lst may be a [nested] list
+  ; or a scalar.
+
+  ifelse is-number? lst [
+    report (lst >= 0)
+  ] 
+  [
+    report reduce [?1 and ?2] map [all-non-negative? ?] lst
+  ]
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+;; returns the larger of a and b.
+;;
+
+to-report larger-of [ a b ]
+  
+  report ifelse-value (a > b) [a] [b]
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+;; returns the smaller of a and b
+
+to-report smaller-of [ a b ]
+  
+  report ifelse-value (a < b) [a] [b]
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+;; reports true if x is strictly positive, otherwise false.
+
+to-report positive? [ x ]
+  
+  report ifelse-value (x > 0) [true] [false]
+
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+
+;; reports true if x is strictly negative, otherwise false.
+
+to-report negative? [ x ]
+  
+  report ifelse-value (x < 0) [true] [false]
+
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+;; reports +1, 0 or -1 depending on the sign of the argument
+
+to-report sign [ x ]
+  
+  if x = 0 [report 0]
+  report ifelse-value (x > 0) [1] [-1]
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+;; ------------------------------------------------------------------------------------------------------
+
+to-report positions-where-equal [ thing input-list ]
+
+  ;; reports a list of the postions at which "thing" is found in the input list.
+
+  ;; let posns n-values length input-list [?]
+  ;; report remove -1 (map [ifelse-value (?1 = thing) [?2] [-1]] input-list posns)  
+  report filter [item ? input-list = thing] n-values (length input-list) [?]
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+to-report positions-where-not-equal [ thing input-list ]
+
+  ;; reports a list of the postions at which "thing" is not found in the input list.
+
+  ;; let posns n-values length input-list [?]
+  ;; report remove -1 (map [ifelse-value (?1 != thing) [?2] [-1]] input-list posns)  
+  report filter [item ? input-list != thing] n-values (length input-list) [?]
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+to-report position-of-min [ input-list ]
+  
+  ; reports the first instance of the minimum element in the input list.
+  
+  if empty? input-list [report false]
+  report position (min input-list) input-list
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+;; ------------------------------------------------------------------------------------------------------
+; All the PDV reporters assume a flow beginning in period zero, an undiscounted "today".
+;; ------------------------------------------------------------------------------------------------------
+
+to-report PDV-inf [ amt rate ]
+  
+  report amt + amt / rate
+
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+
+to-report PDV-const [ amt rate nper ]
+  
+  let fctr 1.0 / (1.0 + rate)
+  let disc reduce [?1 + fctr ^ ?2] fput 0 n-values nper [?]
+  report amt * disc
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+to-report PDV-list [ amt rate ]
+  
+  let x 1.0 + rate
+  report sum (map [?1 / x ^ ?2] amt n-values length amt [?])
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+;; ------------------------------------------------------------------------------------------------------
+
+;; Scheduler procedures
+;; a schedule is a list of lists, with each item of the list consisting
+;; of an integer time value and a task to be executed at that time.
+
+
+to-report schedule-create
+  
+  let schedule []
+  report schedule
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+to-report schedule-execute [ schedule current-time ]
+  ;; executes all the taks in the schedule with an execution time 
+  ;; less than or equal to "current-time".
+  ;; this procedure assumes that the schedule is sorted by time.
+  ;; tasks are deleted from the list once they have been executed.
+  ;; if the schedule is empty, nothing happens.
+  
+  while [not empty? schedule and first first schedule <= current-time] [
+    run last first schedule
+    set schedule butfirst schedule
+  ]
+  
+  report schedule
+
+end
+
+;; ------------------------------------------------------------------------------------------------------
+  
+to-report schedule-sort [ schedule ]
+  ;; sorts the schedule by time values. 
+  ;; note that empty lists are not a problem for sort-by.
+  
+  report sort-by [first ?1 < first ?2] schedule
+    
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+to-report schedule-add [ schedule at-time new-task]
+  ;; adds a task to the schedule and re-sorts the schedule if the added task
+  ;; is to be executed at a time before the last task in the current schedule
+  ;; (which of course is assumed to be already sorted).
+  
+  if not is-number? at-time or not is-command-task? new-task [
+    ;; this is not a legal item to add to the schedule
+    ;; throw an error
+    throw-error (word "Ill-formed new task in schedule-add: " new-task)
+  ]
+  
+  let n ifelse-value (empty? schedule) [ -1 ] [ first last schedule ]
+  report ifelse-value (n > at-time) [ schedule-sort lput (list at-time new-task) schedule ] 
+    [ lput (list at-time new-task) schedule ]
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+to-report is-between? [ a b1 b2 ]
+  ; reports "true" if a is strictly between b1 and b2 (and not equal to either).
+  
+  report ( (a < (larger-of b1 b2)) AND (a > (smaller-of b1 b2)) )
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+to-report string-split [ str splitter ]
+  
+  while [member? splitter str] [
+    let j position splitter str
+    
+  ]
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+
+
+

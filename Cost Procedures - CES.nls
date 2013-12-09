@@ -1,0 +1,181 @@
+; PROCEDURES DEPENDENT UPON A SPECIFIC COST FUNCTION.
+
+; These are for a CES production function and they call Cobb-Douglas procedures if sigma = 1.
+; We assume CRS.
+
+;; ------------------------------------------------------------------------------------------------------
+
+to-report my-Q
+  
+  ; reports the firm's output at its current K and L.
+  
+  ; FIRM CONTEXT
+  
+  if (frm.sigma = 1) [report my-Q-CD]
+  
+  report frm.A * (frm.alpha * frm.K ^ frm.rho + frm.beta * frm.L ^ frm.rho) ^ (1 / frm.rho)
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+to-report my-SRMC [ Q ]
+  
+  ; reports the firm's marginal cost of labor (SRMC) as a function of total output.
+
+  ; FIRM CONTEXT
+
+  if (frm.sigma = 1) [report my-SRMC-CD Q]
+  
+  if (Q = 0) [report 0]
+  
+  let L my-hiring Q
+  report [rgn.wageL] of frm.region-agent / (frm.beta * frm.A ^ frm.rho * (L / Q) ^ (frm.rho - 1))
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+;; ------------------------------------------------------------------------------------------------------
+;; ------------------------------------------------------------------------------------------------------
+
+to-report my-hiring [ Q ]
+  
+  ; reports the labor needed by the firm at any given quantity (and frm.K).
+  
+  ; FIRM context
+  
+  if (frm.sigma = 1) [report my-hiring-CD Q]
+  if (Q = 0) [report 0]
+  
+  ; the SR labor demand function --> infinity at a finite value of Q. So, we check for that and 
+  ; set L to a very large number if that occurs.  Indeed L will be negative on the other side of 
+  ; that value of Q, so we check for that as well.
+  let L 0
+  carefully [
+    set L ( ( (Q / frm.A) ^ frm.rho - frm.alpha * frm.K ^ frm.rho ) / frm.beta ) ^ (1 / frm.rho)
+  ]
+  [
+    ifelse (member? "math operation produced a number too large for NetLogo" error-message) [
+      set L gbl.big  
+    ]
+    [
+      error error-message
+    ]
+  ]
+  
+  ; if L is negative, it is on the other side of the Q at which L --> infinity.  Set it to a big number.
+  if (L < 0) [set L gbl.big]
+  
+  ; it is possible that Q is just short of the critical value at with L --> infinity, and thus L is in
+  ; fact > the big number. For continity, we cap L at that big number.
+  report smaller-of L gbl.big
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+to-report my-capacity
+  
+  ; reports the firm's capacity given its current capital stock.
+
+  ; FIRM CONTEXT
+  
+  if (frm.sigma = 1) [report my-capacity-CD]
+  
+  let x ((frm.beta * [rgn.wageK] of frm.region-agent) / (frm.alpha * [rgn.wageL] of frm.region-agent)) ^ (frm.rho / (1 - frm.rho))
+  report frm.A * frm.K * (frm.alpha + frm.beta * x) ^ (1 / frm.rho)
+
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+to-report my-optimal-K [ Q ]
+  
+  ; reports the particlular firm's optimal optimal long-run capital stock for output Q.
+  
+  ; FIRM CONTEXT
+  
+  if (frm.sigma = 1) [report my-optimal-K-CD Q]
+  
+  let x ((frm.beta * [rgn.wageK] of frm.region-agent) / (frm.alpha * [rgn.wageL] of frm.region-agent)) ^ (frm.rho / (1 - frm.rho))
+  report Q / ( frm.A * (frm.alpha + frm.beta * x) ^ (1 / frm.rho) )
+
+end  
+
+;; ------------------------------------------------------------------------------------------------------
+
+to-report optimal-K [ q A alpha beta sigma v w ]
+  
+  ; reports the optimal long-run capital stock for output Q at the given wages for a production 
+  ; with the given parameters.
+  
+  ; NO CONTEXT
+  
+  if (sigma = 1) [report optimal-K-CD q A alpha beta v w]
+  
+  let rho (sigma - 1) / sigma
+  let x ((beta * v) / (alpha * w)) ^ (rho / (1 - rho))
+  report q / ( A * (alpha + beta * x) ^ (1 / rho) )
+
+end  
+
+;; ------------------------------------------------------------------------------------------------------
+;; ------------------------------------------------------------------------------------------------------
+
+to-report optimal-L [ q A alpha beta sigma v w ]
+  
+  ; reports the optimal long-run labor stock for output Q at the given wages for a production 
+  ; with the given parameters.
+  
+  ; NO CONTEXT
+  
+  if (sigma = 1) [report optimal-L-CD q A alpha beta v w]
+  
+  let rho (sigma - 1) / sigma
+  let x ((alpha * w) / (beta * v)) ^ (rho / (1 - rho))
+  report q / ( A * (alpha * x + beta) ^ (1 / rho) )
+
+end
+;; ------------------------------------------------------------------------------------------------------
+
+to-report hiring-at [ q A alpha beta sigma v w K ]
+  
+  ; reports the labor needed at output q by a firm with given K and production function parameters.
+  
+  ; NO CONTEXT
+  
+  if (sigma = 1) [report hiring-at-CD  q A alpha beta v w K]
+  if (q = 0) [report 0]
+  
+  let rho (sigma - 1) / sigma
+  ; the SR labor demand function --> infinity at a finite value of Q. So, we check for that and 
+  ; set L to a very large number if that occurs.  Indeed L will be negative on the other side of 
+  ; that value of Q, so we check for that as well.
+  let L 0
+  carefully [
+    set L ( ( (Q / A) ^ rho - alpha * K ^ rho ) / beta ) ^ (1 / rho)
+  ]
+  [
+    ifelse (member? "math operation produced a number too large for NetLogo" error-message) [
+      set L gbl.big  
+    ]
+    [
+      error error-message
+    ]
+  ]
+  
+  ; if L is negative, it is on the other side of the Q at which L --> infinity.  Set it to a big number.
+  if (L < 0) [set L gbl.big]
+  
+  ; it is possible that Q is just short of the critical value at with L --> infinity, and thus L is in
+  ; fact > the big number. For continity, we cap L at that big number.
+  report smaller-of L gbl.big
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+;; ------------------------------------------------------------------------------------------------------
+;; ------------------------------------------------------------------------------------------------------
+;; ------------------------------------------------------------------------------------------------------
+;; ------------------------------------------------------------------------------------------------------
+

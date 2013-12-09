@@ -1,0 +1,701 @@
+
+to-report firm-add-new
+  
+  ;; Asks the region of the datastore to create and report a new firm if expected profits > 0.
+  ;; If no firm is created, reports "nobody".
+  ;;
+  ;; DATASTORE CONTEXT, CALLED BY INDUSTRY
+  
+  let ep new-firm-expected-profit lcl.initial-capacity lcl.pf-A
+  ifelse ep > 0 [
+    ; We let firm-create-with-capacity determine both the capacity and the technological 
+    ; constant of the new firm.
+    let new-firm firm-create-with-capacity 0 0
+    ask new-firm [
+      firm-history-start
+      ask frm.shipment-agents [ shipment-history-start ]
+      firm-announce-in
+      ]
+    
+    ; inform the datastore and the potential markets of this firm that a new firm has been created.
+    ; (We don't use this at the moment, but may."
+    set lcl.producer-added? true
+    ask new-firm [
+      ask frm.shipment-agents [
+        ask shpa.market [ set mkt.supplier-added? true ]
+      ]
+    ]
+    
+    report new-firm
+  ]
+  [
+    report nobody
+  ]
+  
+end  ;; of addnew
+
+;; ------------------------------------------------------------------------------------------------------
+
+to-report firm-create-with-capacity [ cap A0 ]
+  
+  ;; Creates a new firm. If the argument cap is non-zero, we use that value as the initial capacity
+  ;; for the firm.  If it is zero, set the new firm's capacity based on the capacities of the 
+  ;; other firms in the region. If the argument A0 is non-zero, we use it as the initial technology
+  ;; constant.  If it is zero, we assign A0 randomly.
+  
+  ;; LOCALITY CONTEXT
+  
+  let A 0
+  ifelse A0 != 0 [
+    set A A0
+  ]
+  [
+    ifelse lcl.costs-random-normal?
+      [
+        set A random-normal lcl.pf-A lcl.pf-A-stddev
+      ]
+      [
+        let x lcl.pf-A-range / 2.0
+        set A lcl.pf-A - x + random-float lcl.pf-A-range
+      ]
+  ]
+  set A larger-of 0 A
+  
+  let C 0
+  ifelse cap != 0 [
+    set C cap
+  ]
+  [
+    ;; If there are other firms already in this region, the firm enters with a value of capacity
+    ;; equal to the median firm.  If there are no other firms in this region,
+    ;; the new firm enters with a capacity equal to firm at the 40th percentile of all firms in 
+    ;; the industry. (Note: the new firm is not yet included in lcl.firm-n, lcl.firm-set and
+    ;; ind.firm-set.  It is added later on in this procedure.) if there are no firms at all in the 
+    ;; industry, use the intial capacity value for this locality.
+    ifelse any? [ind.firm-set] of lcl.ind-agent [
+      set C ifelse-value (lcl.firm-n > 0)
+      ;[[frm.capacity] of (median-one-of lcl.firm-set task [[frm.capacity] of ?])]
+      [median [frm.capacity] of lcl.firm-set]
+      ;[[frm.capacity] of (percentile-one-of [ind.firm-set] of lcl.ind-agent 40 task [[frm.capacity] of ?])]
+      [percentile [frm.capacity] of lcl.firm-set 40]
+    ]
+    [
+      set C lcl.initial-capacity
+    ]
+  ]
+
+  ;; Now create the new firm.
+  report firm-create C A
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+to-report firm-create [ cap A0 ]
+  
+  ;; Creates a new firm with the given capacity and A0. 
+  ;;
+  ;;
+  ;; LOCALITY CONTEXT
+  
+  let this-locality self
+  let this-industry lcl.ind-agent
+  ;  let this-world lcl.world-agent
+  let new-firm nobody
+  let lnks no-links
+  
+  hatch-firms 1 [
+    set new-firm self
+    set hidden? true
+;    move-to [lcl.my-patch] of this-locality
+    set frm.ind-agent [lcl.ind-agent] of this-locality
+    ;      set frm.industry-number [lcl.ind-number] of this-locality
+    set frm.ind-name [lcl.ind-name] of this-locality
+    set frm.locality this-locality
+    set frm.region-agent [lcl.region-agent] of this-locality
+    set frm.region-name [rgn.full-name] of frm.region-agent
+    set frm.is-dummy? false
+    
+    set frm.alpha [lcl.pf-alpha] of this-locality
+    set frm.beta [lcl.pf-beta] of this-locality
+    set frm.sigma [lcl.pf-sigma] of this-locality
+    set frm.rho (frm.sigma - 1) / frm.sigma
+    
+    set frm.A0 A0
+    set frm.A frm.A0
+    set frm.capacity cap
+    set frm.initial-capacity frm.capacity
+    set frm.capacity-cushion [lcl.capacity-cushion] of this-locality
+    set frm.depreciation-rate [lcl.depreciation-rate] of this-locality
+    set frm.capacity-adj-factor [lcl.capacity-adj-factor] of this-locality
+    set frm.K my-optimal-K cap
+    
+    set frm.current-sales 0
+    set frm.shipment-lookback [lcl.shipments-lookback] of this-locality
+    set frm.max-shipment-change [lcl.max-shipment-change] of this-locality
+    set frm.minimum-export [lcl.minimum-export] of this-locality
+    set frm.market-entry-payback-period [lcl.market-entry-payback-period] of this-locality
+    set frm.max-entries-per-period gbl.max-new-markets
+    set frm.K-adjustment-factor [lcl.K-adjustment-factor] of this-locality
+    set frm.current-profit 0
+    set frm.profit-forecast 0
+    set frm.profit-lookback [lcl.avgProfit-lookback] of this-locality
+    set frm.expected-profit 0
+    set frm.cash-balance 0
+    set frm.cash-flow 0
+    
+    set frm.shipment-agents shipment-agents-create
+    set frm.shipment-agentlist sort-on [shpa.market] frm.shipment-agents
+  ]
+  
+  ;; add the firm and its links to the appropriate datastore agentsets and lists.
+  set lcl.firm-set (turtle-set new-firm lcl.firm-set)
+  set lcl.firm-n count lcl.firm-set
+  ask lcl.ind-agent [
+    set ind.firm-set (turtle-set new-firm ind.firm-set)
+    set ind.firm-set-list add-agent new-firm ind.firm-set-list   ;; this will end up as a sorted list.
+  ]
+  
+  report new-firm
+  
+end  ;; of create-firm
+
+;; ------------------------------------------------------------------------------------------------------
+
+;to firm-clone-myself
+;  
+;  ;; Procedure to have a firm clone itself.
+;  ;;
+;  ;; FIRM CONTEXT
+;  
+;  let cloning-firm self
+;  let this-datastore frm.datastore
+;  let this-industry [lcl.ind-agent] of this-datastore
+;  let new-firm nobody
+;  let new-shipment-links no-links
+;  let new-shipment-agents no-turtles
+;  
+;  hatch 1 [ set new-firm self ]
+;  
+;  let new-agent nobody
+;  let new-link nobody
+;  foreach frm.shipment-agentlist [
+;    ask ? [
+;      hatch 1 [
+;        set new-agent self
+;        
+;      ]]
+;    ask new-firm [ 
+;      create-shipment-to [shpa.market] of ? [
+;        set new-link self
+;        set shpl.shipment-agent new-agent
+;      ]
+;    ]
+;    ask new-agent [
+;      set shpa.shipment-link new-link
+;      set shpa.firm [end1] of new-link
+;      set shpa.market [end2] of new-link
+;    ]
+;  ]
+;  
+;  ; ask the cloned firm to collect the agentsets and sorted lists of shipment links and agents.
+;  ask new-firm [
+;    set frm.shipment-links my-out-shipments
+;    set frm.shipment-agents turtle-set [shpl.shipment-agent] of frm.shipment-links 
+;    set frm.shipment-linklist sort-by [[[mkt.number] of end2] of ?1 < [[mkt.number] of end2] of ?2] frm.shipment-links
+;    set frm.shipment-agentlist sort-by [[[mkt.number] of shpa.market] of ?1 < [[mkt.number] of shpa.market] of ?2] frm.shipment-agents
+;  ]
+;  
+;  ;; add the new firm and its links to the appropriate datastore agentsets and lists.
+;  ask this-datastore [
+;    set lcl.firm-set (turtle-set new-firm lcl.firm-set)
+;    set lcl.firm-n count lcl.firm-set
+;    ask lcl.ind-agent [
+;      set ind.firm-set (turtle-set new-firm ind.firm-set)
+;      set ind.firm-set-list add-agent new-firm ind.firm-set-list   ;; this will end up as a sorted list.
+;    ]
+;  ]
+;  
+;end  ;; of firm-clone-myself
+
+;; ------------------------------------------------------------------------------------------------------
+
+;; Asks the firm to notify the home datastore of the firm and all the markets this firm supplies that  
+;; it will die, and then asks the firm to die.
+;; Note that if this is the last firm in the region, we record the period value for future reference.
+;; 
+;; FIRM CONTEXT
+
+to firm-close-down
+  
+  ;; inform any market in which the firm was active that a firm has died and, in the process, 
+  ; kill off all the shipment agents.
+  ask frm.shipment-agents [
+    if shpa.volume-sold > 0 [
+      ask shpa.market [ set mkt.supplier-pruned? true ]
+    ]
+    die
+  ]
+  
+  ;; inform the local datastore and remove this firm from its set of firms.
+  let this-firm self
+  ask frm.locality [
+    set lcl.producer-pruned? true
+    set lcl.firm-set remove-agent this-firm lcl.firm-set
+    set lcl.firm-n count lcl.firm-set
+    if lcl.firm-n = 0 [set lcl.last-firm-died gbl.current-period]
+  ]
+  
+  
+  ;; inform the industry agent and remove this firm from its set of firms.
+  ask [lcl.ind-agent] of frm.locality [
+    set ind.firm-set remove-agent this-firm ind.firm-set
+    set ind.firm-set-list remove-agent this-firm ind.firm-set-list
+  ]
+  
+  die   ;; this kills all the outlinks from the firm as well.
+  
+  ;; now ask each market to update is number of suppliers, Pbar, etc.
+  ask ind.markets [market-update]
+  
+end  ;; of Close down
+
+;; ------------------------------------------------------------------------------------------------------
+
+to firm-announce-in
+  
+  ; FIRM CONTEXT
+  
+  if ((gbl.in-setup1? or gbl.in-setup2?) and gbl.setup-report?) 
+  or (not (gbl.in-setup1? or gbl.in-setup2?) and gbl.go-report? and [ind.report-results?] of frm.ind-agent) [
+    print-message gbl.cmd map [myprecision ? 3] 
+    (list "At the beginning of period " gbl.current-period " in industry " frm.ind-name ", " self  
+      " was created in " [rgn.full-name] of frm.region-agent " with an A0 of " frm.A0)
+  ]
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+to firm-announce-out
+  
+  ; FIRM CONTEXT
+  
+  if ((gbl.in-setup1? or gbl.in-setup2?) and gbl.setup-report?) 
+  or (not (gbl.in-setup1? or gbl.in-setup2?) and gbl.go-report? and [ind.report-results?] of frm.ind-agent) [
+;      stats:use-most-recent frm.history frm.profit-lookback
+      print-message gbl.cmd map [myprecision ? 3] 
+      (list "At the beginning of period " gbl.current-period " in industry " frm.ind-name ", " self  
+        " died in market " [rgn.full-name] of frm.region-agent " with A0 " frm.A0 " MC " frm.MC " Profit forecast "
+       frm.profit-forecast 
+;      " and Profits " stats:get-observations frm.history "profits"
+       )
+    ]
+
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+;; Allows the firm to adjust its capacity.
+;; At the moment we require that the firm have a shipment history of frm.shipments-lookback, but
+;; this can be changed in the first "if" and the remaining code will still work.
+;;
+;; The firm uses the mean (or forecast?) of the shipments in the past frm.shipments-smooth-factor 
+;; periods to set its desired capacity and therefore its desired capital stock.
+;;
+;; Note that we do not allow the firm to shrink by more than its depreciation rate and that the
+;; desired capacity is always somewhat in excess of the firm's shipment forecast.  The firm can expand
+;; by only frm.capcity-adj-factor in any given period, and it can contract to only 50% of its
+;; initial capacity.
+;;
+;; FIRM CONTEXT
+
+to firm-adjust-capacity
+  
+  if stats:get-nobs frm.history >= frm.shipment-lookback [
+    stats:use-most-recent frm.history frm.shipment-lookback
+    let desired-capacity stats:forecast-linear-growth-at frm.history "shipments" 1
+    set desired-capacity desired-capacity * frm.capacity-cushion
+    
+    let min-allowed larger-of ((1.0 - frm.depreciation-rate) * frm.capacity) (0.5 * frm.initial-capacity)
+    set desired-capacity larger-of desired-capacity min-allowed
+    
+    let max-allowed frm.capacity * frm.capacity-adj-factor
+    set desired-capacity smaller-of desired-capacity max-allowed
+    
+    set frm.K my-optimal-K desired-capacity
+    set frm.capacity desired-capacity
+  ]
+  
+end  ;; of adjust-capacity
+
+;; ------------------------------------------------------------------------------------------------------
+
+to firm-history-start
+  
+  ;; FIRM CONTEXT
+  
+  set frm.history stats:newtable
+  stats:set-names frm.history ["profits" "shipments" "sales" "cash"]
+    
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+to firm-history-update
+  
+  ;; FIRM CONTEXT
+  
+  stats:add frm.history (list frm.current-profit frm.current-shipments frm.current-sales frm.cash-balance)
+  stats:use-most-recent frm.history frm.profit-lookback
+  set frm.profit-forecast stats:forecast-linear-growth-at frm.history "profits" 1
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+;; reports the n biggest losers in the firmset, based upon the reporter passed in the string 
+;; "rptr".  If there are no losers, reports "no-turtles".  If there are fewer than
+;; n losers, reports all of them.
+;;
+;; NO CONTEXT ASSUMED
+
+to-report firm-n-biggest-losers [ n firmset reptr ]
+  
+  let losers firmset with [firm-is-loser?]
+  ifelse (any? losers) [
+    let nn smaller-of n count losers
+    report n-of nn losers
+  ] 
+  [
+  report no-turtles
+  ]
+  
+end  ;; of n-biggest-losers
+
+;; ------------------------------------------------------------------------------------------------------
+
+to-report firm-is-loser?
+  
+;; returns true or false depending upon whether the firm is a candidate for shutting down.  
+;; We've tried to concentrate this code in one procedure so that it will be easy to change as the model
+;; develops.
+;;
+;; FIRM CONTEXT
+
+  let result false
+  
+  if gbl.loss-criterion = "profits" [
+    stats:use-most-recent frm.history frm.profit-lookback
+    let profit-hist stats:get-observations frm.history "profits"
+    ;  show mean profit-hist show stats:forecast-linear-growth-at frm.history "profits" 2  
+    if (length profit-hist >= frm.profit-lookback
+      and mean profit-hist < 0
+      and stats:forecast-linear-growth-at frm.history "profits" 2 < 0)
+    [set result true]
+  ]
+  
+  if gbl.loss-criterion = "cash-balance" [
+    ; We look to see if the cash balance is more negative than current profits and if the cash balance
+    ; has been negative at least three times in the recent past (including this period).
+    ; NOTE that current-profit is not the same as cash flow, but likely tracks it fairly well. If it 
+    ; exceeds the cash deficit, the firm may be digging its way out of the hole.
+    stats:use-most-recent frm.history frm.profit-lookback
+    let cash-hist stats:get-observations frm.history "cash"
+    if (frm.cash-balance + frm.current-profit < 0
+      and (length filter [? < 0] cash-hist) >= 3)
+    [set result true]
+  ]
+
+  
+  report result  
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+to firm-set-current-shipments
+
+  ;; The firm sets its desired sales in each market so as to maximize its profits.
+  ;;
+  ;; We use a list of markets rather than an agentset of markets because the quantities in qlist must be
+  ;; in market-number order so that they will be associated with the correct market in all the routines
+  ;; called by neg-expected-profits, which is in turn called by the various solution methods.
+  ;;
+  ;; FIRM CONTEXT
+  
+  ; profitmax-linklist -agentlist and -qlist hold the links and quantities that the firm is setting
+  ; in any given iteration.  frm.fixed-list holds the links and quantities of shipments that for whatever
+  ; reason have been fixed, and thus are not passed to the simplex procedure for optimizing. The fixed
+  ; shipments currently result when either the entry cost for a market is too large to make entering that 
+  ; market profitable, or when exports to a market fall below a certain threshhold. In both cases, 
+  ; those shipments are forced to zero.
+  ; We begin with the previous period's shipments as the initial guess for this period.
+  ; The agents in frm.shipment-agentlist are the "shipping agents" along each of the firm's links
+  ; to each market
+  
+  set frm.profitmax-agentlist frm.shipment-agentlist
+  set frm.profitmax-qlist map [[shpa.volume-shipped] of ?] frm.profitmax-agentlist
+  set frm.profitmax-ubounds firm-shipment-upper-limits
+  set frm.profitmax-lbounds firm-shipment-lower-limits
+  set frm.fixed-linklist []
+  set frm.fixed-q-total 0
+
+  ;; now have the firm set its planned sales in each market. We begin with no fixed shipments.
+  let continue? true
+  while [continue?] [
+
+    if not empty? frm.fixed-linklist [ set frm.fixed-q-total sum map [last ?] frm.fixed-linklist ]
+    
+    ifelse table:has-key? gbl.method-table gbl.solution-method [
+      set frm.profitmax-qlist (runresult table:get gbl.method-table gbl.solution-method frm.profitmax-qlist (task [neg-expected-profits ?]) frm.profitmax-lbounds frm.profitmax-ubounds)
+    ] 
+    [
+      show "Invalid solution method"
+      kickout
+    ]
+    
+    ; Allows the testing of all the allowed solution methods.
+;    set frm.profitmax-qlist test-methods frm.profitmax-qlist
+    
+    ; We are finished unless one of the checks below fails, but first check to see if 
+    ; we are in the first setup stage where the checks are not called for.
+    set continue? false
+    if not gbl.in-setup1? [
+      if new-export-market-rejected? OR export-shipment-too-small? [ set continue? true ]
+    ]
+    
+    ; Make sure there are still active markets. We will go back to resolve if there are and
+    ; if continue? ws set to true from the tests above.
+    if empty? frm.profitmax-agentlist [ set continue? false ]
+  ] ; end of continue loop.
+
+  ;; finally, record the results in the shipment links to each market.  Be careful to match up each
+  ;; market quantity with shp.volume-for-sale in the proper link.
+  (foreach frm.profitmax-agentlist frm.profitmax-qlist [ ask ?1 [ set shpa.volume-shipped ?2 ] ])
+  foreach frm.fixed-linklist [ ask first ? [set shpa.volume-shipped last ?] ]
+  
+  ;; because we may want to know what price the firm expected to receive on its shipments, we find 
+  ;; and save that as well.
+  ask frm.shipment-agents [
+    let ep ifelse-value (shpa.volume-shipped > 0) 
+      [provisional-mktprice-discounted-by-clearing shpa.volume-shipped] 
+      [gbl.NA]
+    set shpa.expected-netprice netprice-from-mktprice-discounted ep
+    set shpa.expected-MR marginal-revenue shpa.volume-shipped
+  ]
+  
+end  ;; of set-current-shipments
+  
+;; ------------------------------------------------------------------------------------------------------
+
+to-report new-export-market-rejected? 
+  
+  ; FIRM CONTEXT
+
+      ; Firms may enter only n new export markets in any one period.
+      ; We look to see if the current solution involves the entry into a new export market.  If so, 
+      ; we rank the markets in terms of their expected profit after entry costs and set the 
+      ; shipments to the one with the least expected profit to zero and then go back to resolve.
+      ; We continue to do this until only n or fewer new markets with positive expected profit remain.
+      
+      let total-shipments frm.fixed-q-total + sum frm.profitmax-qlist
+      let SRTC my-SRTC total-shipments
+      let SRMC my-SRMC total-shipments
+      let PDV-ep-list []
+      
+      (foreach frm.profitmax-agentlist frm.profitmax-qlist [
+        if ([shpa.is-export-link?] of ?1) AND ([shpa.volume-sold] of ?1 = 0.0) AND (?2 > 0.0) [
+          ; this is a new export market for the firm. We prorate total costs to get the cost of 
+          ; shipments to this market, BUT SHOULD WE BE USING MARGINAL COST INSTEAD?
+          let pr-costs SRTC * (?2 / total-shipments)
+          let ep [provisional-mktprice-discounted-by-clearing ?2] of ?1
+          set ep [netprice-from-mktprice-discounted ep] of ?1
+          let expected-profit ep * ?2 - pr-costs
+          ; calculate the PV of expected profit, assuming that ep is constant over the payback period, that it begins NEXT
+          ; period (thus the substraction of the expected profit in period 0, and that the firm pays the fixed cost of entry
+          ; in this period.
+          set PDV-ep-list fput list ?1 ((PDV-const expected-profit [rgn.interest-rate] of frm.region-agent frm.market-entry-payback-period) 
+              - expected-profit - [mkt.entry-cost] of ([shpa.market] of ?1)) PDV-ep-list
+          ]
+      ])
+      
+      ; We've tested all the new export links.
+      ; First, check to see if there are any.
+      if empty? PDV-ep-list [ report false ]
+      
+      ; There are some; rank them and extract the worst.
+      set PDV-ep-list sort-by [last ?1 < last ?2] PDV-ep-list
+;      show PDV-ep-list
+      let worst-link first first PDV-ep-list
+      let worst-ep last first PDV-ep-list
+      
+      ; If worst is negative, or if it is positive but there max-new-markets or more above it, set its shipments
+      ; to zero and report true. Otherwise, keep it and report false.
+      if worst-ep < 0 OR (length PDV-ep-list > gbl.max-new-markets) [
+        let m position worst-link frm.profitmax-agentlist
+        ; Set this quantity to zero on the fixed list and remove this market from the "active" list.
+        set frm.fixed-linklist fput (list item m frm.profitmax-agentlist 0) frm.fixed-linklist
+        set frm.profitmax-agentlist remove-item m frm.profitmax-agentlist
+        set frm.profitmax-qlist remove-item m frm.profitmax-qlist
+        set frm.profitmax-ubounds remove-item m frm.profitmax-ubounds
+        set frm.profitmax-lbounds remove-item m frm.profitmax-lbounds
+        report true
+      ]
+      
+      report false
+      
+end
+      
+;; ------------------------------------------------------------------------------------------------------
+
+to-report firm-shipment-upper-limits
+  
+  ; return a list of the upper limit for the shipment to each market.
+  ; lots of ways to do this, but for now use frm.max-shipment-change unless the current shipments
+  ; are <= 10, in which case we set no effective limit as the firm is likely just entering the 
+  ; market and has no established base.
+  
+  let x map [ifelse-value (? <= 10) [1.0E6] [(1.0 + frm.max-shipment-change) * ?]] frm.profitmax-qlist
+  report x
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+to-report firm-shipment-lower-limits
+  
+  ; return a list of the lower limit for the shipment to each market.  
+  ; lots of ways to do this, but for now lets use frm.max-shipment-change unless the remainder is less
+  ; than 10 units, in which case set the limit to zero.  Eventually we are going to base this on a
+  ; history of past shipments that allows a gracefull exit from the market.
+  
+  let x map [(1.0 - frm.max-shipment-change) * ?] frm.profitmax-qlist
+  set x map [ifelse-value (? <= 10) [0] [?]] x
+  report x  
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+to-report export-shipment-too-small?
+  
+  ; FIRM CONTEXT
+  
+  ; We check to see if any export shipment is too small.  At the moment, we check for exports below
+  ; frm.minimum-export. If we find any, chose a random one and set it to zero, then return "true".
+  
+  let toosmall? (map [([shpa.is-export-link?] of ?1) AND (is-between? ?2 0.0 frm.minimum-export)] frm.profitmax-agentlist frm.profitmax-qlist)
+  
+  if not member? true toosmall? [ report false ]  ; no shipment is too small.
+  
+  let m one-of positions-where-equal true toosmall?  ; choose a random too-small shipment
+  ; Set this quantity to zero on the fixed list, remove this market from the "active" list
+  ; and report true.
+  set frm.fixed-linklist fput (list item m frm.profitmax-agentlist 0) frm.fixed-linklist
+  set frm.profitmax-agentlist remove-item m frm.profitmax-agentlist
+  set frm.profitmax-qlist remove-item m frm.profitmax-qlist
+  set frm.profitmax-ubounds remove-item m frm.profitmax-ubounds
+  set frm.profitmax-lbounds remove-item m frm.profitmax-lbounds
+  report true
+  
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+to-report shipment-agents-create
+  
+  ; FIRM CONTEXT
+  
+  ; create the shipment links and associate a shipment agent with each. Then initialize all.
+  let shipment-links no-links
+  let shipment-agents no-turtles
+  
+  create-shipments-to [ind.markets] of frm.ind-agent [ 
+    set shipment-links (link-set self shipment-links)
+    set hidden? true
+  ]
+  set frm.shipment-links shipment-links
+  set frm.shipment-linklist sort-on [end2] frm.shipment-links
+  
+  foreach frm.shipment-linklist [
+    let shp-agent nobody
+    hatch-shipagents 1 [
+      set shp-agent self
+      set shipment-agents (turtle-set self shipment-agents)
+      set hidden? true
+      set shpa.shipment-link ?
+      set shpa.firm [end1] of ?
+      set shpa.market [end2] of ?
+    ]
+    ask ? [ set shpl.shipment-agent shp-agent ]
+  ]
+  
+  ask shipment-agents [ shipment-agent-initialize ]
+  
+  report shipment-agents
+  
+end
+  
+;; ------------------------------------------------------------------------------------------------------
+
+to shipment-agent-initialize 
+  
+  ; SHIPMENT-AGENT CONTEXT
+   
+  set shpa.source-region [frm.region-agent] of shpa.firm
+  set shpa.source-country [rgn.country-name] of shpa.source-region
+  set shpa.source-locality [frm.locality] of shpa.firm
+  set shpa.destination-region [mkt.region-agent] of shpa.market
+  set shpa.destination-country [rgn.country-name] of shpa.destination-region
+  set shpa.ind-agent [frm.ind-agent] of shpa.firm
+  let src shpa.source-locality
+  let dst shpa.market
+  set shpa.commercial-link one-of (([ind.commercial-links] of shpa.ind-agent) with [end1 = src AND end2 = dst])
+  set shpa.is-export-link? ifelse-value (shpa.source-country != shpa.destination-country) [true] [false]
+  
+;  let dbsnum [lcl.number] of shpa.source-locality
+;  let mktnum [mkt.number] of shpa.market
+  
+  set shpa.volume-shipped 0
+  set shpa.volume-for-sale 0
+  set shpa.volume-sold 0
+  
+  set shpa.profit-on-shipments 0
+  set shpa.profit-on-sales 0
+  set shpa.cost-of-goods-shipped 0
+  set shpa.cost-of-goods-for-sale 0
+  set shpa.cost-of-goods-sold 0      
+  
+  set shpa.expected-netprice gbl.NA
+  set shpa.expected-MR 0
+  set shpa.netprice gbl.NA
+  set shpa.FOB gbl.NA
+  set shpa.CIF gbl.NA
+  set shpa.mktprice-discounted gbl.NA
+  set shpa.mktprice gbl.NA
+  
+  let c1 [who] of ([rgn.country-agent] of shpa.source-region)
+  let c2 [who] of ([rgn.country-agent] of shpa.destination-region)
+  set shpa.distance ifelse-value (c1 = c2) [0.0] [[link-length] of country-link c1 c2]
+  set shpa.unit-freight-cost shpa.distance * [ind.transport-cost] of shpa.ind-agent
+  set shpa.tariff-rate [clnk.tariff-rate] of shpa.commercial-link
+  set shpa.unit-tariff [clnk.unit-tariff] of shpa.commercial-link
+  set shpa.subsidy-rate [clnk.subsidy-rate] of shpa.commercial-link
+  set shpa.unit-subsidy [clnk.unit-subsidy] of shpa.commercial-link
+  
+  
+  set shpa.sales-cost-max-discount [mkt.sales-cost-max-discount] of shpa.market
+  set shpa.sales-cost-free-ride-factor [mkt.sales-cost-free-ride-factor] of shpa.market
+  
+  ; Entry and marketing costs apply only to export markets.
+  set shpa.entry-cost ifelse-value shpa.is-export-link? [[mkt.entry-cost] of shpa.market] [0]
+  set shpa.marketing-cost-rate ifelse-value shpa.is-export-link? [[mkt.marketing-cost-rate] of shpa.market] [0]
+  set shpa.marketing-cost-unit-charge ifelse-value shpa.is-export-link? [[mkt.marketing-cost-unit-charge] of shpa.market] [0]
+  
+  set shpa.history-lookback [frm.shipment-lookback] of shpa.firm
+
+end
+
+;; ------------------------------------------------------------------------------------------------------

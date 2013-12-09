@@ -1,0 +1,1 @@
+sh $NETLOGO_ROOT/batch-FILES/MRBSpaceSubmitTableRun.sh "Multiregional_Model.nlogo" $1 "$1.csv"
