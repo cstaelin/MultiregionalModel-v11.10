@@ -1,4 +1,4 @@
- extensions [ numanal stats pathdir shell scheduler table profiler string]
+ extensions [ numanal stats pathdir shell time table profiler string]
 
 __includes [
   
@@ -462,6 +462,8 @@ Auto FMe
 
 @#$#@#$#@
 ## WHAT IS IT?
+
+V11 includes a number of changes, including much reworked coding, using a hacked extension for scheduling, using csv files for data input, etc.  With v11.10 we've moved to using git and GitHub for version control. 2013-12-11
 
 V10 is a fresh start in April 2013.  (V8 was last worked on in August 2012.)  V10.00.00 includes our own NL scheduler routines, added to utilitesV7.nls to form utilitiesv8.nls.
 

@@ -297,7 +297,8 @@ to world-export-to-file [ fname ]
   ; Now, in case we are going to run the model in this session, we need to reload all those structures 
   ; that could not be exported "as is".
   set-profitmax-methods-table
-  ask worlds [ set wld.policy-schedule policy-load-changes ]
+;  ask worlds [ set wld.policy-schedule policy-load-changes ]
+  ask worlds [policy-load-changes]
   
   ask firms [
     set frm.history stats:newtable-from-row-list frm.history-table-data
@@ -343,7 +344,8 @@ to world-import-from-file [ world-file ]
   import-world world-file
   
   set-profitmax-methods-table
-  ask worlds [ set wld.policy-schedule policy-load-changes ]
+;  ask worlds [ set wld.policy-schedule policy-load-changes ]
+  ask worlds [policy-load-changes]
   
   ask firms [
     set frm.history stats:newtable-from-row-list frm.history-table-data
@@ -712,8 +714,10 @@ to world-setup
   
   ; Load the predetermined policy changes for this run as they may affect how the industry
   ; is populated with firms.
-  set wld.policy-schedule policy-load-changes
-  scheduler:perform-scheduled-tasks wld.policy-schedule 0
+;  set wld.policy-schedule policy-load-changes
+  policy-load-changes
+;  scheduler:perform-scheduled-tasks wld.policy-schedule 0
+  time:go-until 0
   
   BehaviorSpace-value-set
   
