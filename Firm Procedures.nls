@@ -38,10 +38,12 @@ end  ;; of addnew
 
 to-report firm-create-with-capacity [ cap A0 ]
   
-  ;; Creates a new firm. If the argument cap is non-zero, we use that value as the initial capacity
-  ;; for the firm.  If it is zero, set the new firm's capacity based on the capacities of the 
-  ;; other firms in the region. If the argument A0 is non-zero, we use it as the initial technology
-  ;; constant.  If it is zero, we assign A0 randomly.
+  ; Creates a new firm. If the argument cap is non-zero, we use that value as the initial capacity
+  ; for the firm.  If it is zero, set the new firm's capacity based on the capacities of the 
+  ; other firms in the region. However, capacity may never be less than 
+  ; lcl.initial-capacity * lcl.min-capacity.
+  ; If the argument A0 is non-zero, we use it as the initial technology
+  ; constant.  If it is zero, we assign A0 randomly.
   
   ;; LOCALITY CONTEXT
   
@@ -83,6 +85,9 @@ to-report firm-create-with-capacity [ cap A0 ]
       set C lcl.initial-capacity
     ]
   ]
+  
+  ; but check for capacity >= minimum capacity in this locality.
+  set C larger-of C (lcl.initial-capacity * lcl.min-capacity)
 
   ;; Now create the new firm.
   report firm-create C A
@@ -296,19 +301,21 @@ end
 
 ;; ------------------------------------------------------------------------------------------------------
 
-;; Allows the firm to adjust its capacity.
-;; At the moment we require that the firm have a shipment history of frm.shipments-lookback, but
-;; this can be changed in the first "if" and the remaining code will still work.
-;;
-;; The firm uses the mean (or forecast?) of the shipments in the past frm.shipments-smooth-factor 
-;; periods to set its desired capacity and therefore its desired capital stock.
-;;
-;; Note that we do not allow the firm to shrink by more than its depreciation rate and that the
-;; desired capacity is always somewhat in excess of the firm's shipment forecast.  The firm can expand
-;; by only frm.capcity-adj-factor in any given period, and it can contract to only 50% of its
-;; initial capacity.
-;;
-;; FIRM CONTEXT
+; Allows the firm to adjust its capacity.
+; At the moment we require that the firm have a shipment history of frm.shipments-lookback, but
+; this can be changed in the first "if" and the remaining code will still work.
+;
+; The firm uses the mean (or forecast?) of the shipments in the past frm.shipments-smooth-factor 
+; periods to set its desired capacity and therefore its desired capital stock.
+;
+; Note that we do not allow the firm to shrink by more than its depreciation rate and that the
+; desired capacity is always somewhat in excess of the firm's shipment forecast.  In no event can the 
+; firm's capacity be less than the larger of  (lcl.initial-capacity * lcl.min-capacity) and 50% of its 
+; initial capacity.
+;
+; The firm can expand ;; by only frm.capcity-adj-factor in any given period.
+;
+; FIRM CONTEXT
 
 to firm-adjust-capacity
   
@@ -317,7 +324,8 @@ to firm-adjust-capacity
     let desired-capacity stats:forecast-linear-growth-at frm.history "shipments" 1
     set desired-capacity desired-capacity * frm.capacity-cushion
     
-    let min-allowed larger-of ((1.0 - frm.depreciation-rate) * frm.capacity) (0.5 * frm.initial-capacity)
+    let min-allowed max (list ((1.0 - frm.depreciation-rate) * frm.capacity) (0.5 * frm.initial-capacity)
+      ([lcl.initial-capacity * lcl.min-capacity] of frm.locality) )
     set desired-capacity larger-of desired-capacity min-allowed
     
     let max-allowed frm.capacity * frm.capacity-adj-factor

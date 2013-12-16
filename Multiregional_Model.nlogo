@@ -168,7 +168,7 @@ INPUTBOX
 210
 120
 gbl.Seed
-55556
+55555
 1
 0
 Number

@@ -611,6 +611,7 @@ to locality-setup [ locality-data ]
    
   set lcl.begin-with-n first data                   set data butfirst data
   set lcl.initial-capacity first data               set data butfirst data
+  set lcl.min-capacity first data                   set data butfirst data
   set lcl.initial-capital-stock first data          set data butfirst data
   set lcl.initial-capital-stock-range first data    set data butfirst data
   set lcl.capacity-cushion first data               set data butfirst data

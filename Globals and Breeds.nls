@@ -205,6 +205,7 @@ localities-own [
   
   lcl.begin-with-n                  ;; scalar
   lcl.initial-capacity              ;; scalar
+  lcl.min-capacity                  ;; scalar (fraction)
   lcl.initial-capital-stock         ;; scalar
   lcl.initial-capital-stock-range   ;; scalar, as a proportion of the mean
   lcl.capacity-cushion              ;; scalar
