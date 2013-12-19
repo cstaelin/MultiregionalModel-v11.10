@@ -8,12 +8,11 @@ end
 
 ;; ------------------------------------------------------------------------------------------------------
 
-; to-report policy-load-changes
-to policy-load-changes
+to-report policy-load-changes
   
   let policy-setup-data read-data-from-file (word gbl.data-path gbl.policy-data) true
   
-;  let policy-schedule scheduler:create
+  let policy-schedule scheduler:create
   foreach policy-setup-data [
     let period item 0 ?
     let policy item 1 ?
@@ -22,22 +21,16 @@ to policy-load-changes
     let src ifelse-value (policy != "TC") [item 4 ?] [""]
     let dest ifelse-value (policy != "TC") [item 5 ?] [""]
     
-;    if policy = "TC" [scheduler:add policy-schedule industry-named ind task [tc-set value] period]
-;    if policy = "unit-tariff" [scheduler:add policy-schedule industry-named ind task [unittar-set dest src value] period]
-;    if policy = "tariff-rate" [scheduler:add policy-schedule industry-named ind task [tarrate-set dest src value] period]
-;    if policy = "unit-subsidy" [scheduler:add policy-schedule industry-named ind task [unitsub-set src dest value] period]
-;    if policy = "subsidy-rate" [scheduler:add policy-schedule industry-named ind task [subrate-set src dest value] period]
-;    if policy = "entry-cost" [scheduler:add policy-schedule industry-named ind task [entry-cost-set dest value] period]
-    
-    if policy = "TC" [time:schedule-event industry-named ind task [tc-set value] period]
-    if policy = "unit-tariff"  [time:schedule-event industry-named ind task [unittar-set dest src value] period]
-    if policy = "tariff-rate"  [time:schedule-event industry-named ind task [tarrate-set dest src value] period]
-    if policy = "unit-subsidy" [time:schedule-event industry-named ind task [unitsub-set src dest value] period]
-    if policy = "subsidy-rate" [time:schedule-event industry-named ind task [subrate-set src dest value] period]
-    if policy = "entry-cost"   [time:schedule-event industry-named ind task [entry-cost-set dest value] period]
+    if policy = "TC" [scheduler:add policy-schedule industry-named ind task [tc-set value] period]
+    if policy = "unit-tariff" [scheduler:add policy-schedule industry-named ind task [unittar-set dest src value] period]
+    if policy = "tariff-rate" [scheduler:add policy-schedule industry-named ind task [tarrate-set dest src value] period]
+    if policy = "unit-subsidy" [scheduler:add policy-schedule industry-named ind task [unitsub-set src dest value] period]
+    if policy = "subsidy-rate" [scheduler:add policy-schedule industry-named ind task [subrate-set src dest value] period]
+    if policy = "entry-cost" [scheduler:add policy-schedule industry-named ind task [entry-cost-set dest value] period]
   ]
   
-;  report policy-schedule    
+  report policy-schedule
+    
   
 end
 

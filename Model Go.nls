@@ -154,8 +154,7 @@ to advance-one-period
     ; If we are not in the second stage of setup, make any requested policy changes before 
     ; firms make decisions.
     if not gbl.in-setup2? [
-;      ask worlds [ scheduler:perform-scheduled-tasks wld.policy-schedule gbl.current-period ]
-       ask worlds [ time:go-until gbl.current-period ]
+      ask worlds [ scheduler:perform-scheduled-tasks wld.policy-schedule gbl.current-period ]
     ]
     
     ; If transport costs have changed since the previous period, update all the shipment links.
