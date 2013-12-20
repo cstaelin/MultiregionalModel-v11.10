@@ -61,7 +61,7 @@ to-report firm-create-with-capacity [ cap A0 ]
         set A lcl.pf-A - x + random-float lcl.pf-A-range
       ]
   ]
-  set A larger-of 0 A
+  set A larger-of 0.01 A        ; can't have an A <= zero
   
   let C 0
   ifelse cap != 0 [
@@ -74,15 +74,13 @@ to-report firm-create-with-capacity [ cap A0 ]
     ;; the industry. (Note: the new firm is not yet included in lcl.firm-n, lcl.firm-set and
     ;; ind.firm-set.  It is added later on in this procedure.) if there are no firms at all in the 
     ;; industry, use the intial capacity value for this locality.
-    ifelse any? [ind.firm-set] of lcl.ind-agent [
+    ifelse any? [ind.firm-set] of lcl.ind-agent [                         ; firms in the industry
       set C ifelse-value (lcl.firm-n > 0)
-      ;[[frm.capacity] of (median-one-of lcl.firm-set task [[frm.capacity] of ?])]
-      [median [frm.capacity] of lcl.firm-set]
-      ;[[frm.capacity] of (percentile-one-of [ind.firm-set] of lcl.ind-agent 40 task [[frm.capacity] of ?])]
-      [percentile [frm.capacity] of lcl.firm-set 40]
+      [median [frm.capacity] of lcl.firm-set]                             ; firms in the locality
+      [percentile [frm.capacity] of ([ind.firm-set] of lcl.ind-agent) 40] ; no firms in the locality
     ]
     [
-      set C lcl.initial-capacity
+      set C lcl.initial-capacity                                          ; no firms in the industry
     ]
   ]
   
