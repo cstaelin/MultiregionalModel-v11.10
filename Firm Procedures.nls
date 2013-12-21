@@ -1,10 +1,10 @@
 
 to-report firm-add-new
   
-  ;; Asks the region of the datastore to create and report a new firm if expected profits > 0.
-  ;; If no firm is created, reports "nobody".
-  ;;
-  ;; DATASTORE CONTEXT, CALLED BY INDUSTRY
+  ; Asks the region of the datastore to create and report a new firm if expected profits > 0.
+  ; If no firm is created, reports "nobody".
+  ;
+  ; LOCALITY CONTEXT, CALLED BY INDUSTRY
   
   let ep new-firm-expected-profit lcl.initial-capacity lcl.pf-A
   ifelse ep > 0 [
@@ -112,8 +112,7 @@ to-report firm-create [ cap A0 ]
     set hidden? true
 ;    move-to [lcl.my-patch] of this-locality
     set frm.ind-agent [lcl.ind-agent] of this-locality
-    ;      set frm.industry-number [lcl.ind-number] of this-locality
-    set frm.ind-name [lcl.ind-name] of this-locality
+    set frm.ind-name [ind.name] of frm.ind-agent
     set frm.locality this-locality
     set frm.region-agent [lcl.region-agent] of this-locality
     set frm.region-name [rgn.full-name] of frm.region-agent
@@ -123,6 +122,8 @@ to-report firm-create [ cap A0 ]
     set frm.beta [lcl.pf-beta] of this-locality
     set frm.sigma [lcl.pf-sigma] of this-locality
     set frm.rho (frm.sigma - 1) / frm.sigma
+    
+    set frm.follow-me [ind.follow-me] of frm.ind-agent
     
     set frm.A0 A0
     set frm.A frm.A0
@@ -472,7 +473,7 @@ to firm-set-current-shipments
     ]
     
     ; Make sure there are still active markets. We will go back to resolve if there are and
-    ; if continue? ws set to true from the tests above.
+    ; if continue? was set to true from the tests above.
     if empty? frm.profitmax-agentlist [ set continue? false ]
   ] ; end of continue loop.
 

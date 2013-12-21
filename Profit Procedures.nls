@@ -111,8 +111,6 @@ to-report neg-expected-profits [ qlist ]
   
   ; if price is gbl.NA then q will be zero.
   let SRTR sum (map [?1 * ?2] plist qlist) 
-  
-;  show list qlist (- (SRTR - SRTC))
 
   ; We report the negative of expected profits times a multiple, to hopefully make the approach to 
   ; the minimum steeper, and thus easier for the solution method to find.
@@ -179,7 +177,7 @@ to-report provisional-mktprice-discounted-by-clearing [ Q ]
   
   ; find the quantities other firms will offer based on the quantity, Q, to be offered by this shipment
   ; agent, then put Q at the beginning of that list of quantities.
-  let qlist [reaction-to-my Q] of competitors
+  let qlist [amt-reaction-to-my Q] of competitors
   set qlist fput Q qlist
   
   ; NOTE that using clr- vs. clear-the-market means that the value of shp.volume-sold is not updated.
@@ -195,19 +193,43 @@ end
 
 ;; ------------------------------------------------------------------------------------------------------
 
-to-report reaction-to-my [ Q ]
+to-report pct-reaction-to-my [ Q ]
+  
+  ; A firm assumes that its competitors will react to it's changes in shipments by changing their
+  ; shipments by a % = ind.follow-me * the proposed % change in the given firm's own sales. 
+  ; Note that is procedure is run by each competitor, so [shpa.volume-sold] of myself is the base 
+  ; sales of the calling firm and shpa.volume-sold is the base sales of the competitor.
+  ; Note too that if the competitors base sales are zero, no reaction will be forthcoming from them
+  ; no matter what the value of ind.follow-me.
   
   ; SHIPMENT LINK AGENT CONTEXT
-  
+
   let their% 0
   let mybase [shpa.volume-sold] of myself
   if mybase != 0 [
     let my% (Q - mybase) / mybase
-    set their% my% * [ind.follow-me] of shpa.ind-agent / 100
+    set their% my% * [ind.follow-me] of shpa.ind-agent
   ]
   
   let theirQ larger-of 0 ((1.0 + their%) * shpa.volume-sold)
   report theirQ
+  
+end
+  
+;; ------------------------------------------------------------------------------------------------------
+
+to-report amt-reaction-to-my [ Q ]
+  
+  ; A firm assumes that its competitors will react to it's changes in shipments by changing their
+  ; shipments by ind.follow-me * the proposed change in the given firm's own sales. 
+  ; Note that is procedure is run by each competitor, so [shpa.volume-sold] of myself is the base 
+  ; sales of the calling firm and shpa.volume-sold is the base sales of the competitor.
+  ; Note too that this expected reaction does not depend on the competitor' current sales base.
+  
+  ; SHIPMENT LINK AGENT CONTEXT
+ 
+  let theirchg [[frm.follow-me] of shpa.firm * (Q - shpa.volume-sold)] of myself
+  report larger-of 0 (theirchg + shpa.volume-sold)
   
 end
   

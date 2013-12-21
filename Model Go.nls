@@ -121,7 +121,7 @@ to advance-one-period
     ;; shipments.
     ask ind.firm-set [firm-adjust-capacity]
     
-    ;; Allow each region to create new firms.
+    ;; Allow each locality to create new firms.
     ;; firm-add-new allows only one new firm, and only if that firm would be profitable,
     ;; thus the check for "nobody".
     if (gbl.current-period > 1 AND gbl.allow-new-firms?) [

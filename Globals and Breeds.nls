@@ -353,6 +353,8 @@ firms-own [
   frm.sigma                         ;; scalar, CES elasticity of substitution
   frm.rho                           ;; scalar, (sigma - 1) / sigma
   
+  frm.follow-me                     ;; scalar
+  
   frm.capacity                      ;; scalar, firm's capacity in units of output
   frm.initial-capacity              ;; scalar, firm's capacity upon its creation
   frm.depreciation-rate             ;; scalar
