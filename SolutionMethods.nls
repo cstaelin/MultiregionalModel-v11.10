@@ -51,27 +51,62 @@ to-report simplex [ xvec mapping lbounds ubounds ]
   let rtol (10 ^ (- gbl.profitmax-precision))
   let atol (10 ^ ((- gbl.profitmax-precision) * 2))
   let side-length larger-of 1 (0.10 * min xvec)
-;  show side-length
   let guess set-bounds xvec lbounds ubounds
-  report (numanal:simplex xvec mapping side-length rtol atol)
+  set gbl.error? false
+  let yvec []
+  carefully [
+    set yvec (numanal:simplex guess mapping side-length rtol atol 0)
+  ]
+  [
+    set gbl.error? true
+    ifelse member? "Simplex exceeded" error-message [
+      print-message gbl.cmd error-message
+      set yvec xvec
+    ]
+    [
+      error error-message
+    ]
+  ]
+  
+  report yvec
+  
 end
 
 ;; ------------------------------------------------------------------------------------------------------
 
 to-report simplex-nm [ xvec mapping lbounds ubounds ]  
+  
   set gbl.return-type "scalar"
   let rtol 0.0
-;  let rtol (10 ^ (- gbl.profitmax-precision))
+  ;  let rtol (10 ^ (- gbl.profitmax-precision))
   let atol (10 ^ ((- gbl.profitmax-precision) * 2))
   let side-length larger-of 1 (0.10 * min xvec)
   ; The guess must lie strictly inside the bounds for this method.
   let guess set-bounds xvec lbounds ubounds
-  report (numanal:simplex-nm guess mapping side-length rtol atol)
+  set gbl.error? false
+  let yvec []
+  carefully [
+    set yvec (numanal:simplex-nm guess mapping side-length rtol atol 10000)
+  ]
+  [
+    set gbl.error? true
+    ifelse member? "Simplex exceeded" error-message [
+      print-message gbl.cmd error-message
+      set yvec xvec
+    ]
+    [
+      error error-message
+    ]
+  ]
+  
+  report yvec
+  
 end
 
 ;; ------------------------------------------------------------------------------------------------------
 
 to-report simplex-md [ xvec mapping lbounds ubounds ]  
+  
   set gbl.return-type "scalar"
   let rtol 0.0
 ;  let rtol (10 ^ (- gbl.profitmax-precision))
@@ -79,36 +114,104 @@ to-report simplex-md [ xvec mapping lbounds ubounds ]
   let side-length larger-of 1 (0.10 * min xvec)
   ; Although zero is the lower bound, the guess must lie strictly inside the bounds for this method.
   let guess set-bounds xvec lbounds ubounds
-  report (numanal:simplex-md guess mapping side-length rtol atol)
+  set gbl.error? false
+  let yvec []
+  carefully [
+    set yvec (numanal:simplex-md guess mapping side-length rtol atol 0)
+  ]
+  [
+    set gbl.error? true
+    ifelse member? "Simplex exceeded" error-message [
+      print-message gbl.cmd error-message
+      set yvec xvec
+    ]
+    [
+      error error-message
+    ]
+  ]
+  
+  report yvec
+
 end
 
 ;; ------------------------------------------------------------------------------------------------------
 
 to-report BOBYQA-minimize [ xvec mapping lbounds ubounds ]
+  
   set gbl.return-type "scalar"
+  
   ifelse length xvec >= 2 [
     ;  let initial-radius larger-of 1 (0.8 * min xvec)
     let initial-radius 0    ; use the default
     let stop-radius 1.0e-6  ; the default of 1.0e-8 seems to small - leads to an error.
-      ; Although zero is the lower bound, the guess must lie strictly inside the bounds for this method.
+                            ; Although zero is the lower bound, the guess must lie strictly inside the bounds for this method.
     let guess set-bounds xvec lbounds ubounds
-    report (numanal:BOBYQA-minimize guess mapping initial-radius stop-radius)
+    set gbl.error? false
+    let yvec []
+    carefully [
+      set yvec (numanal:BOBYQA-minimize guess mapping initial-radius stop-radius)
+    ]
+    [
+      set gbl.error? true
+      ifelse member? "BOBYQA exceeded" error-message [
+        print-message gbl.cmd error-message
+        set yvec xvec
+      ]
+      [
+        error error-message
+      ]
+    ]
+    report xvec
   ]
   [
-    let ub 1000
-    let rslt numanal:brent-minimize (task [neg-expected-profits-univariate ?]) 0.0 ub 1.0e-6
-    if rslt >= ub [show "Brent-maximize hit the upper bound."]
+    let lb item 0 lbounds
+    let ub item 0 ubounds
+    set gbl.error? false
+    let rslt item 0 xvec
+    carefully [
+      set rslt numanal:brent-minimize (task [neg-expected-profits-univariate ?]) lb ub 1.0e-6
+      if rslt >= ub [show "Brent-minimize hit the upper bound."]
+      if rslt <= lb [show "Brent-minimize hit the lower bound."]
+    ]
+    [
+      set gbl.error? true
+      ifelse member? "Brent-minimize exceeded" error-message [
+        print-message gbl.cmd error-message
+      ]
+      [
+        error error-message
+      ]
+    ]
     report (list rslt)
   ]
+  
 end
 
 ;; ------------------------------------------------------------------------------------------------------
 
 to-report CGS-minimize [ xvec mapping lbounds ubounds ]
+
   set gbl.return-type "scalar"
   ; Although zero is the lower bound, the guess must lie strictly inside the bounds for this method.
   let guess set-bounds xvec lbounds ubounds
-  report (numanal:CGS-minimize guess mapping 1.0e-6 1.0e-6 0 10000 0)
+  set gbl.error? false
+  let yvec []
+  carefully [
+    set yvec (numanal:CGS-minimize guess mapping 1.0e-6 1.0e-6 0 10000 0)
+  ]
+  [
+    set gbl.error? true
+    ifelse member? "CGS-minimize exceeded" error-message [
+      print-message gbl.cmd error-message
+      set yvec xvec
+    ]
+    [
+      error error-message
+    ]
+  ]
+  
+  report yvec
+  
 end
 
 ;; ------------------------------------------------------------------------------------------------------
@@ -117,7 +220,24 @@ to-report CDS-minimize [ xvec mapping lbounds ubounds ]
   set gbl.return-type "scalar"
   ; Although zero is the lower bound, the guess must lie strictly inside the bounds for this method.
   let guess set-bounds xvec lbounds ubounds
-  report (numanal:CDS-minimize guess mapping 1.0e-6 1.0e-6 0 10000 0 true)
+  set gbl.error? false
+  let yvec []
+  carefully [
+    set yvec (numanal:CDS-minimize guess mapping 1.0e-6 1.0e-6 0 10000 0 true)
+  ]
+  [
+    set gbl.error? true
+    ifelse member? "CDS-minimize exceeded" error-message [
+      print-message gbl.cmd error-message
+      set yvec xvec
+    ]
+    [
+      error error-message
+    ]
+  ]
+  
+  report yvec  
+
 end
 
 ;; ------------------------------------------------------------------------------------------------------
@@ -126,7 +246,24 @@ to-report CMAES-minimize [xvec mapping lbounds ubounds ]
   set gbl.return-type "scalar"
   ; Although zero is the lower bound, the guess must lie strictly inside the bounds for this method.
   let guess set-bounds xvec lbounds ubounds
-  report numanal:CMAES-minimize guess mapping map [? / 2.0] guess
+  set gbl.error? false
+  let yvec []
+  carefully [
+    set yvec (numanal:CMAES-minimize guess mapping map [? / 2.0] guess)
+  ]
+  [
+    set gbl.error? true
+    ifelse member? "CMAES-minimize exceeded" error-message [
+      print-message gbl.cmd error-message
+      set yvec xvec
+    ]
+    [
+      error error-message
+    ]
+  ]
+  
+  report yvec  
+
 end
 
 ;; ------------------------------------------------------------------------------------------------------

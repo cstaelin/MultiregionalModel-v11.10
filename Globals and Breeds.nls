@@ -61,6 +61,8 @@ globals [
   gbl.tiny                   ;; A "tiny" number.
   gbl.NA                     ;; the number used to signifiy "NA".
   
+  gbl.error?
+  
   gbl.profile-start
   gbl.profile-end
   gbl.cmd

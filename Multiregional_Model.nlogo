@@ -382,7 +382,7 @@ INPUTBOX
 150
 275
 gbl.policy-data
-policy-data-tc200.csv
+policy-data-tc50.csv
 1
 0
 String

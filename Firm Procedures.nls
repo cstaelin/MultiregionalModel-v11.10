@@ -450,11 +450,17 @@ to firm-set-current-shipments
 
   ;; now have the firm set its planned sales in each market. We begin with no fixed shipments.
   let continue? true
-  while [continue?] [
+  set gbl.error? false
+  while [continue? and not gbl.error?] [
 
     if not empty? frm.fixed-linklist [ set frm.fixed-q-total sum map [last ?] frm.fixed-linklist ]
     
     ifelse table:has-key? gbl.method-table gbl.solution-method [
+      ; the chosen solution procedure may return an "exceeded maximum number of iterations error"
+      ; If it does, the procedure will set gbl.error? to true and report the initial guess
+      ; for frm.profitmax-qlist.  For now, we simply accept that as the solution and move on, hoping 
+      ; that the same problem will not occur the next period.  We could look at using a different
+      ; solution procedure instead, perhaps a slower but more robust one such as CMAES.
       set frm.profitmax-qlist (runresult table:get gbl.method-table gbl.solution-method frm.profitmax-qlist (task [neg-expected-profits ?]) frm.profitmax-lbounds frm.profitmax-ubounds)
     ] 
     [
@@ -465,16 +471,20 @@ to firm-set-current-shipments
     ; Allows the testing of all the allowed solution methods.
 ;    set frm.profitmax-qlist test-methods frm.profitmax-qlist
     
-    ; We are finished unless one of the checks below fails, but first check to see if 
-    ; we are in the first setup stage where the checks are not called for.
-    set continue? false
-    if not gbl.in-setup1? [
-      if new-export-market-rejected? OR export-shipment-too-small? [ set continue? true ]
+    ; We are finished unless one of the checks below sends us back, but first check to see if
+    ; there has been a solution error, in which case there is not need to check.
+    if not gbl.error? [
+      set continue? false
+      ; If either of these checks on export markets is true, we need to resolve, as long as 
+      ; we are not in setup.  If neither is true, we can stop.
+      if (not gbl.in-setup1?) [
+        if (new-export-market-rejected? or export-shipment-too-small?) [ set continue? true ]
+      ]
+      
+      ; Make sure there are still active markets. If there are none, we need to stop,
+      ; even in setup and even if one of the checks on export markets is true.
+      if empty? frm.profitmax-agentlist [ set continue? false ]
     ]
-    
-    ; Make sure there are still active markets. We will go back to resolve if there are and
-    ; if continue? was set to true from the tests above.
-    if empty? frm.profitmax-agentlist [ set continue? false ]
   ] ; end of continue loop.
 
   ;; finally, record the results in the shipment links to each market.  Be careful to match up each
