@@ -84,7 +84,6 @@ to populate-by-industry [ mkts ]
     repeat gbl.history-length [ firm-history-update ]
     ask frm.shipment-agents [ 
       set shpa.expected-MR marginal-revenue shpa.volume-shipped
-      shipment-history-start
       repeat gbl.history-length[ shipment-history-update ]
     ] 
   ]

@@ -580,7 +580,7 @@ end
 
 ;; ------------------------------------------------------------------------------------------------------
 
-to-report firm-shipment-lower-limits
+to-report firm-shipment-lower-limits-old
   
   ; return a list of the lower limit for the shipment to each market.  
   ; lots of ways to do this, but for now lets use frm.max-shipment-change unless the remainder is less
@@ -590,6 +590,45 @@ to-report firm-shipment-lower-limits
   let x map [(1.0 - frm.max-shipment-change) * ?] frm.profitmax-qlist
   set x map [ifelse-value (? <= 10) [0] [?]] x
   report x  
+  
+end
+
+;; ------------------------------------------------------------------------------------------------------
+
+
+to-report firm-shipment-lower-limits
+  
+  ; return a list of the lower limit for the shipment to each market. Only export markets are checked.
+  ; To do this, need to know the history in each market in frm.profitmax-qlist.
+  ; The corresponding shipment agent is given by frm.profitmax-agentlist.
+  ; Each shipment agent has a stats table pointed to by shpa.history.
+  ; The shipment history is given by the "shipped" column in that table.
+  ; We look back n+1 periods, find the largest shipment in that interval (mx), and allow
+  ; firm to reduce shipments to that market by mx/n each period.
+  ; n is hardwired as 3, if we continue to use this method we'll make it a setup parameter.
+  
+  let n 3
+  let nn n + 1
+  let x []
+  foreach frm.shipment-agentlist [
+    ask ? [
+      let mn 0
+      if shpa.is-export-link? [
+        stats:use-most-recent shpa.history nn
+        let hist stats:get-observations shpa.history "shipped"
+        if not empty? hist [
+          let mx max hist
+          let j position mx hist
+          let delta mx / n
+          set mn mx - delta * (j + 1)
+          set mn larger-of mn 0
+        ]
+      ]
+      set x lput mn x
+    ]
+  ]
+  
+  report x
   
 end
 
@@ -645,6 +684,7 @@ to-report shipment-agents-create
       set shpa.shipment-link ?
       set shpa.firm [end1] of ?
       set shpa.market [end2] of ?
+      shipment-history-start
     ]
     ask ? [ set shpl.shipment-agent shp-agent ]
   ]

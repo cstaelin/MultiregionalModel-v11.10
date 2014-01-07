@@ -153,7 +153,7 @@ to-report BOBYQA-minimize [ xvec mapping lbounds ubounds ]
     ]
     [
       set gbl.error? true
-      ifelse member? "BOBYQA exceeded" error-message [
+      ifelse (member? "BOBYQA exceeded" error-message or member? "trust region has failed" error-message) [
         print-message gbl.cmd error-message
         set yvec xvec
       ]
